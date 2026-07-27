@@ -7,8 +7,8 @@ export const OrchestratorOutputSchema = z.object({
 });
 
 export const SpecialistOutputSchema = z.object({
-  technicalDraft: z.string().describe("The deep, pragmatic technical text in US English. Insert placeholders like [CODE_SNIPPET_1] where code should appear."),
-  codeSnippets: z.array(z.string()).describe("An array containing only the raw, compilable code snippets."),
+  technicalDraft: z.string().describe("The deep, pragmatic technical text in US English. Insert placeholders like [CODE_SNIPPET_1] ONLY if code is required/generated. Otherwise, write a text-only draft without code placeholders."),
+  codeSnippets: z.array(z.string()).describe("An array containing raw, compilable code snippets if code is needed. Set to an empty array [] if the post is conceptual/text-only."),
 });
 
 export const CorrectionItemSchema = z.object({

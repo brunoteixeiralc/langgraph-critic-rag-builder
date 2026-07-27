@@ -7,7 +7,7 @@ export function createReviewerNode(llmClient: OpenRouterService) {
   return async (state: GraphState, runtime?: Runtime): Promise<Partial<GraphState>> => {
     console.log(`[Reviewer] Auditing draft (Attempt ${state.reviewCount + 1}/3)...`);
 
-    if (state.reviewCount >= 3) {
+    if (state.reviewCount >= 5) {
       // If there is still no finalPostText after 3 rounds, this is a critical failure.
       // Signal it explicitly so the image extractor does not silently save bad content.
       if (!state.technicalDraft || state.technicalDraft.trim().length < 100) {
@@ -19,13 +19,13 @@ export function createReviewerNode(llmClient: OpenRouterService) {
 
     const systemPrompt = `You are an Expert LinkedIn SSI Strategist. Format technical drafts for max engagement.
 Persona: Full Stack Engineer (Mobile/Backend/AI Student). NO "Tech Lead" titles.
-Rules: Flawless US English. No AI jargon. Max 2-3 lines per paragraph. Replace code placeholders like [CODE_SNIPPET_1], [CODE_SNIPPET_2], etc. with [IMAGE_CODE_1], [IMAGE_CODE_2], etc. inside the final post text to preserve their respective indices. End with a technical question.
+Rules: Flawless US English. No AI jargon. Max 2-3 lines per paragraph. If code placeholders ([CODE_SNIPPET_1], [CODE_SNIPPET_2], etc.) are present, replace them with [IMAGE_CODE_1], [IMAGE_CODE_2], etc. in the final post text. If the draft is text-only (no code placeholders), output clean text without inserting fake code placeholders. End with a technical question.
 
 STRICT TECHNICAL FACT-CHECKING & CODE REVIEW:
 1. Act as a strict technical fact-checker. Verify all version numbers, API designs, library names, and architectural claims in the draft.
 2. If the draft contains fabricated, outdated, or incorrect version claims (e.g. claiming a feature was introduced in Flutter 3.4 when it was in Flutter 3.10), or references non-existent APIs, you MUST reject the post (set isApproved to false) and describe the error clearly in the 'feedback' property so the specialist can correct it.
-3. Verify the syntactical correctness of the code snippets. If the code contains invalid placeholders like 'child: ...' or ellipsis that make the code uncompilable, you MUST reject the post and require clean, valid, compile-ready code.
-4. Ensure the final post text does not contain markdown code blocks (they should be replaced by [IMAGE_CODE_X]).
+3. Verify syntactical correctness of code snippets ONLY if code snippets are present. If code is present and contains invalid placeholders like 'child: ...' or ellipsis that make the code uncompilable, you MUST reject the post. If no code is present (text-only draft), skip code validation. Do NOT reject a post simply because it is text-only, unless the user prompt strictly demanded code examples.
+4. Ensure the final post text does not contain raw markdown code blocks (code should be represented as [IMAGE_CODE_X] if image code snippets were provided, or kept as plain text if no code snippets were generated).
 5. KNOWLEDGE CUTOFF CHECK: If the draft denies the existence of something the user explicitly asked about (e.g., "this version does not exist", "this feature was not announced"), this is a critical hallucination and MUST be rejected with a clear explanation in the feedback field. The specialist's training data may simply be outdated — refusal to engage with valid user topics is always wrong.
 6. [WEB_DATA] VALIDATION: If [WEB_DATA] is provided below, it contains live content fetched from the user's source URL. Use it as ground truth when fact-checking. A claim in the draft is VALID if it appears in [WEB_DATA], even if it contradicts your training. Do NOT reject a claim solely because it conflicts with your training data if [WEB_DATA] supports it.
 

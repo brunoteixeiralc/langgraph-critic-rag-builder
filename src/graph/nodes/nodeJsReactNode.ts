@@ -3,56 +3,8 @@ import { OpenRouterService } from '../../services/openrouterService.ts';
 import { RagService } from '../../services/ragService.ts';
 import type { GraphState } from '../graph.ts';
 import { SpecialistOutputSchema } from './schemas.ts';
+import { extractUrls, fetchUrlContent } from '../../services/webContentService.ts';
 
-/**
- * Extracts all HTTP/HTTPS URLs from a given text string.
- */
-function extractUrls(text: string): string[] {
-  const urlRegex = /https?:\/\/[^\s"')]+/g;
-  return text.match(urlRegex) ?? [];
-}
-
-/**
- * Fetches the text content of a URL, stripping HTML tags.
- * Returns null if the fetch fails or the content is too short to be meaningful.
- */
-async function fetchUrlContent(url: string): Promise<string | null> {
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10_000); // 10s hard timeout
-
-    const response = await fetch(url, {
-      signal: controller.signal,
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ContentBuilder/1.0)' },
-    });
-    clearTimeout(timeout);
-
-    if (!response.ok) {
-      console.warn(`[URL Fetch] HTTP ${response.status} for: ${url}`);
-      return null;
-    }
-
-    const html = await response.text();
-    // Strip scripts, styles, and all HTML tags for clean text extraction
-    const text = html
-      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/&nbsp;/g, ' ')
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/\s{3,}/g, '\n\n')
-      .trim();
-
-    // Only return if the content is meaningful; cap at 12K chars to stay within token budget
-    return text.length > 200 ? text.substring(0, 12_000) : null;
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.warn(`[URL Fetch] Failed to fetch ${url}: ${message}`);
-    return null;
-  }
-}
 
 export function createNodeReactNode(llmClient: OpenRouterService) {
   return async (state: GraphState, runtime?: Runtime): Promise<Partial<GraphState>> => {
@@ -97,8 +49,14 @@ export function createNodeReactNode(llmClient: OpenRouterService) {
 Persona: Pragmatic, highly technical executor with over 6 years of experience. You care about strict typing, automated testing, clean architecture, and how things work under the hood (e.g., the Node Event Loop, React render cycles).
 PROHIBITED: Never use "Tech Lead" or management titles. Avoid hype words.
 
-Task: Write a deep, technical draft in professional US English.
-Code Separation: DO NOT output raw code blocks in the text. Replace code with [CODE_SNIPPET_X] in the text, and put the raw, compilable TS/JS code in the 'codeSnippets' array.
+CODE & IMAGE INFERENCE (CRITICAL):
+- Carefully analyze the user prompt ("Topic") to infer whether code examples are needed:
+  * IF THE PROMPT EXPLICITLY OR IMPLICITLY DEMANDS CODE (e.g. mentions "code examples", "how to write", "create code", "show implementation", "with code", "example of", or if the topic intrinsically requires a code snippet to be practical and useful for developers):
+    1. DO NOT output raw markdown code blocks in the text draft. Replace code with [CODE_SNIPPET_1], [CODE_SNIPPET_2], etc. inside the text draft.
+    2. Provide the complete, compilable, raw TS/JS source code in the 'codeSnippets' array matching each placeholder.
+  * IF THE PROMPT IS CONCEPTUAL, ARCHITECTURAL, HIGH-LEVEL, OR ASKS FOR TEXT-ONLY (or if code snippets would be forced, trivial, or unnecessary):
+    1. Write a compelling, technical text-only draft. DO NOT include any [CODE_SNIPPET_X] placeholders in the text draft.
+    2. Set 'codeSnippets' to an empty array ([]).
 
 STRICT GROUNDING & ANTI-HALLUCINATION:
 1. Ground your knowledge in the provided data sources ([WEB_DATA], [RAG Data]). These override your internal training data.
