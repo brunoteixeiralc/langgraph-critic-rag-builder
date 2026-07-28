@@ -2,6 +2,11 @@ import fs from 'fs/promises';
 import path from 'path';
 import type { Runtime } from '@langchain/langgraph';
 import type { GraphState } from '../graph.ts';
+import { MAX_REVIEW_ATTEMPTS } from './edgeConditions.ts';
+
+// Minimum length for a technicalDraft to be considered salvageable when the
+// review loop is cut off at MAX_REVIEW_ATTEMPTS without approval.
+const MIN_SALVAGEABLE_DRAFT_LENGTH = 100;
 
 function slugify(text: string): string {
   return text
@@ -50,12 +55,22 @@ Valid niche names: "flutter_dart", "node_react", "ai_engineering".`;
       return { reviewCount: 0 };
     }
 
-    if (state.reviewFeedback === 'CRITICAL_FAILURE') {
-      // The reviewer signaled a critical, unrecoverable failure (e.g. topic hallucination).
+    // Critical failure = the review loop was cut off at MAX_REVIEW_ATTEMPTS,
+    // no approved post was produced, AND the last draft is empty/too short to
+    // be worth a human's time. ('CRITICAL_FAILURE' is also checked for
+    // backward compatibility, in case a node still sets that sentinel.)
+    const draftTooShort = !state.technicalDraft || state.technicalDraft.trim().length < MIN_SALVAGEABLE_DRAFT_LENGTH;
+    const reviewLimitReached = state.reviewCount >= MAX_REVIEW_ATTEMPTS;
+    const isCriticalFailure = state.reviewFeedback === 'CRITICAL_FAILURE'
+      || (!state.finalPostText && reviewLimitReached && draftTooShort);
+
+    if (isCriticalFailure) {
+      // The reviewer signaled a critical, unrecoverable failure (e.g. topic hallucination),
+      // or the review loop was exhausted without ever producing a usable draft.
       // Do NOT save linkedin_post.txt — write an error report instead.
-      console.error('[Image Extractor] ❌ CRITICAL FAILURE: Content could not be validated after 3 reviews. Saving error report instead of draft.');
+      console.error(`[Image Extractor] ❌ CRITICAL FAILURE: Content could not be validated after ${MAX_REVIEW_ATTEMPTS} reviews. Saving error report instead of draft.`);
       const errorPath = path.join(outputDir, 'error_report.txt');
-      const errorMsg = `❌ CRITICAL FAILURE: The AI could not produce factually valid content after 3 review cycles.\n\n` +
+      const errorMsg = `❌ CRITICAL FAILURE: The AI could not produce factually valid content after ${MAX_REVIEW_ATTEMPTS} review cycles.\n\n` +
         `This usually means:\n` +
         `- The topic involves a recent release/announcement outside the model's training cutoff.\n` +
         `- The model hallucinated about the existence or non-existence of features.\n\n` +
@@ -73,7 +88,7 @@ Valid niche names: "flutter_dart", "node_react", "ai_engineering".`;
     } else if (state.technicalDraft) {
       // Review limit reached but content is present — save with a warning for manual review.
       const textPath = path.join(outputDir, 'linkedin_post.txt');
-      const warningStr = `⚠️ WARNING: This post did not pass all Reviewer audits (limit of 3 reviews reached).\n` +
+      const warningStr = `⚠️ WARNING: This post did not pass all Reviewer audits (limit of ${MAX_REVIEW_ATTEMPTS} reviews reached).\n` +
         `Verify and correct the technical information before publishing.\n\n` +
         `Last Draft:\n${state.technicalDraft}`;
       await fs.writeFile(textPath, warningStr, 'utf-8');

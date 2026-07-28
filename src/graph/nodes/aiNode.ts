@@ -1,6 +1,6 @@
 import type { Runtime } from '@langchain/langgraph';
 import { OpenRouterService } from '../../services/openrouterService.ts';
-import { RagService } from '../../services/ragService.ts';
+import { ragService } from '../../services/ragService.ts';
 import type { GraphState } from '../graph.ts';
 import { SpecialistOutputSchema } from './schemas.ts';
 import { extractUrls, fetchUrlContent } from '../../services/webContentService.ts';
@@ -9,7 +9,6 @@ export function createAiNode(llmClient: OpenRouterService) {
   return async (state: GraphState, runtime?: Runtime): Promise<Partial<GraphState>> => {
     console.log("[AI Engineering Specialist] Collecting RAG and generating draft...");
 
-    const ragService = new RagService();
     let ragContext = await ragService.retrieveContext(state.initialCommand, "ai_engineering");
 
     if (state.reviewCount > 0 && state.reviewerSearchQuery) {

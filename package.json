@@ -6,6 +6,8 @@
   "main": "src/index.ts",
   "scripts": {
     "start": "npx tsx --env-file .env src/index.ts",
+    "server": "tsx src/server.ts",
+    "server:dev": "npx tsx --env-file .env src/server.ts",
     "test": "node --env-file .env --test tests/**/*.test.ts",
     "test:watch": "node --env-file .env --test --watch tests/**/*.test.ts",
     "langgraph:serve": "npx @langchain/langgraph-cli dev"
@@ -20,6 +22,7 @@
   "author": "Lucas Mota",
   "license": "MIT",
   "devDependencies": {
+    "@types/express": "^5.0.0",
     "@types/node": "^22.19.7",
     "tsx": "^4.16.2",
     "typescript": "^5.3.0"
@@ -36,6 +39,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@openrouter/sdk": "^0.8.0",
     "@pinecone-database/pinecone": "^2.2.2",
+    "express": "^5.1.0",
     "langchain": "^1.2.21",
     "zod": "^3.23.8"
   }

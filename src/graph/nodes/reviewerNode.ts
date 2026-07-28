@@ -2,18 +2,19 @@ import type { Runtime } from '@langchain/langgraph';
 import { OpenRouterService } from '../../services/openrouterService.ts';
 import type { GraphState } from '../graph.ts';
 import { ReviewerOutputSchema } from './schemas.ts';
+import { MAX_REVIEW_ATTEMPTS } from './edgeConditions.ts';
 
 export function createReviewerNode(llmClient: OpenRouterService) {
   return async (state: GraphState, runtime?: Runtime): Promise<Partial<GraphState>> => {
-    console.log(`[Reviewer] Auditing draft (Attempt ${state.reviewCount + 1}/3)...`);
+    console.log(`[Reviewer] Auditing draft (Attempt ${state.reviewCount + 1}/${MAX_REVIEW_ATTEMPTS})...`);
 
-    if (state.reviewCount >= 5) {
-      // If there is still no finalPostText after 3 rounds, this is a critical failure.
-      // Signal it explicitly so the image extractor does not silently save bad content.
-      if (!state.technicalDraft || state.technicalDraft.trim().length < 100) {
-        return { reviewFeedback: 'CRITICAL_FAILURE' };
-      }
-      // Review limit reached but there IS a draft — let it through with a warning.
+    // Defensive short-circuit: routeAfterReview already stops the loop once
+    // reviewCount hits MAX_REVIEW_ATTEMPTS and sends the state straight to
+    // imageExtractor, so this node normally never runs again at/after the cap.
+    // This guard only matters if the node is invoked directly (e.g. graph
+    // resumed from a checkpoint at the limit) — skip the LLM call and let
+    // imageExtractorNode decide whether the draft is salvageable.
+    if (state.reviewCount >= MAX_REVIEW_ATTEMPTS) {
       return { reviewFeedback: '' };
     }
 
