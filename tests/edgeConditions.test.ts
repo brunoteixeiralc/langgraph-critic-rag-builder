@@ -4,9 +4,9 @@ import { routeToSpecialist, routeAfterReview } from '../src/graph/nodes/edgeCond
 import type { GraphState } from '../src/graph/graph.ts';
 
 test('Edge Conditions - Orquestrador: routeToSpecialist', async (t) => {
-  await t.test('Deve rotear para flutterSpecialist', () => {
-    const state = { niche: 'flutter_dart' } as GraphState;
-    assert.strictEqual(routeToSpecialist(state), 'flutterSpecialist');
+  await t.test('Deve rotear para iosSpecialist', () => {
+    const state = { niche: 'ios' } as GraphState;
+    assert.strictEqual(routeToSpecialist(state), 'iosSpecialist');
   });
 
   await t.test('Deve rotear para aiSpecialist', () => {
@@ -22,7 +22,7 @@ test('Edge Conditions - Guardrail do Revisor: routeAfterReview', async (t) => {
   });
 
   await t.test('Deve forçar saída no limite de revisões', () => {
-    const state = { reviewFeedback: 'Still bad', reviewCount: 3, niche: 'flutter_dart' } as GraphState;
+    const state = { reviewFeedback: 'Still bad', reviewCount: 3, niche: 'ios' } as GraphState;
     assert.strictEqual(routeAfterReview(state), 'imageExtractor');
   });
 });

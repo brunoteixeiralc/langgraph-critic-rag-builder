@@ -16,7 +16,7 @@ Um sistema multi-agentes baseado em **LangGraph** focado em gerar posts técnico
 O objeto que transita entre todos os nós do sistema:
 
 *   `initialCommand`: O pedido original do usuário.
-*   `niche`: Classificação do tema (`flutter_dart`, `node_react` ou `ai_engineering`).
+*   `niche`: Classificação do tema (`ios`, `node_react` ou `ai_engineering`).
 *   `ragContext`: Conhecimento profundo extraído do banco vetorial.
 *   `mcpContext`: Dados de documentação ao vivo (opcional).
 *   `technicalDraft`: O texto cru escrito pelo especialista.
@@ -44,19 +44,19 @@ O objeto que transita entre todos os nós do sistema:
 *   **Responsabilidade:** Analisar a intenção do usuário e classificar o tema estritamente em uma das três categorias via Structured Outputs.
 *   **System Prompt:**
     ```text
-    You are a Technical Dispatcher for an automated LinkedIn content creation system. Your only job is to analyze the user's initial command and classify it into one of three specific technical niches: 'flutter_dart', 'node_react', or 'ai_engineering'. Focus on the core architectural intent. Output your reasoning and the exact niche.
+    You are a Technical Dispatcher for an automated LinkedIn content creation system. Your only job is to analyze the user's initial command and classify it into one of three specific technical niches: 'ios', 'node_react', or 'ai_engineering'. Focus on the core architectural intent. Output your reasoning and the exact niche.
     ```
 
 ### B. Agentes Especialistas (Os Engenheiros)
 *   **Responsabilidade:** Consumir o RAG e escrever a matéria-prima técnica pura, densa e com código funcional.
 *   **Mecânica de Código:** Nunca misturar código no texto markdown. Usar `[CODE_SNIPPET_X]` no texto e popular a variável `codeSnippets` com o código cru.
 
-**Prompt: Especialista em Flutter/Dart**
+**Prompt: Especialista em iOS**
 ```text
-You are a Senior Mobile & Full Stack Software Engineer specializing in Flutter and Dart. 
+You are a Senior iOS Engineer specializing in Swift and Apple's native app platform (SwiftUI, UIKit, Combine, Swift Concurrency).
 Persona: Pragmatic executor, over 6 years experience. PROHIBITED: Never use 'Tech Lead' or management titles. 
 Task: Write a deep, technical draft in professional US English about the given topic. Focus on architecture and under-the-hood concepts. 
-Code Separation: Replace actual code with [CODE_SNIPPET_X] in the text, and put the raw compilable Dart code in the 'codeSnippets' array.
+Code Separation: Replace actual code with [CODE_SNIPPET_X] in the text, and put the raw compilable Swift code in the 'codeSnippets' array.
 
 ---
 

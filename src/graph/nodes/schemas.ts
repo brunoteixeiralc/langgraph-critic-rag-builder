@@ -2,8 +2,8 @@ import { z } from "zod/v3";
 
 export const OrchestratorOutputSchema = z.object({
   reasoning: z.string().describe("A brief explanation of why this specific niche was chosen based on the user's initial command."),
-  niche: z.enum(["flutter_dart", "node_react", "ai_engineering", "out_of_scope"]).describe("The exact technical area the command belongs to, or 'out_of_scope' if it is unrelated to these areas."),
-  suggestedFolderSlug: z.string().describe("A very short, succinct folder name (slug) in lowercase with hyphens, representing the topic in max 20 characters. E.g., 'flutter-mediaquery' or 'node-di' or 'ai-agents'."),
+  niche: z.enum(["ios", "node_react", "ai_engineering", "out_of_scope"]).describe("The exact technical area the command belongs to, or 'out_of_scope' if it is unrelated to these areas."),
+  suggestedFolderSlug: z.string().describe("A very short, succinct folder name (slug) in lowercase with hyphens, representing the topic in max 20 characters. E.g., 'ios-swiftui' or 'node-di' or 'ai-agents'."),
 });
 
 export const SpecialistOutputSchema = z.object({

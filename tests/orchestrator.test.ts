@@ -8,10 +8,10 @@ test('Orchestrator - Classificação de Nicho via LLM', async (t) => {
   const llmClient = new OpenRouterService();
   const orchestrator = createOrchestratorNode(llmClient);
 
-  await t.test('Deve classificar comandos de Flutter/Dart corretamente', async () => {
-    const state = { initialCommand: 'Explain dependency injection in Flutter using Widgetbook' } as GraphState;
+  await t.test('Deve classificar comandos de iOS corretamente', async () => {
+    const state = { initialCommand: 'Explain dependency injection in iOS using Swift property wrappers' } as GraphState;
     const result = await orchestrator(state);
-    assert.strictEqual(result.niche, 'flutter_dart');
+    assert.strictEqual(result.niche, 'ios');
     assert.ok(result.suggestedFolderSlug);
   });
 

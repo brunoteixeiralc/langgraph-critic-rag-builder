@@ -3,7 +3,7 @@ import { z } from "zod/v3";
 import { OpenRouterService } from '../services/openrouterService.ts';
 
 import { createOrchestratorNode } from './nodes/orchestratorNode.ts';
-import { createFlutterNode } from './nodes/flutterNode.ts';
+import { createIosNode } from './nodes/flutterNode.ts'; // filename kept as flutterNode.ts — rename to iosNode.ts locally if you want, imports don't need file renames to work
 import { createReviewerNode } from './nodes/reviewerNode.ts';
 import { createImageExtractorNode } from './nodes/imageExtractorNode.ts';
 import { routeToSpecialist, routeAfterReview } from './nodes/edgeConditions.ts';
@@ -12,7 +12,7 @@ import { createAiNode } from "./nodes/aiNode.ts";
 
 export const PostStateAnnotation = z.object({
   initialCommand: z.string(),
-  niche: z.enum(["flutter_dart", "node_react", "ai_engineering", "out_of_scope"]).optional(),
+  niche: z.enum(["ios", "node_react", "ai_engineering", "out_of_scope"]).optional(),
   suggestedFolderSlug: z.string().optional(),
   reviewerSearchQuery: z.string().optional(),
   ragContext: z.string().optional(),
@@ -47,7 +47,7 @@ export type GraphState = z.infer<typeof PostStateAnnotation>;
 export function buildPostGraph(llmClient: OpenRouterService) {
   const graph = new StateGraph(PostStateAnnotation)
     .addNode('orchestrator', createOrchestratorNode(llmClient))
-    .addNode('flutterSpecialist', createFlutterNode(llmClient))
+    .addNode('iosSpecialist', createIosNode(llmClient))
     .addNode('nodeReactSpecialist', createNodeReactNode(llmClient))
     .addNode('aiSpecialist', createAiNode(llmClient))
     .addNode('reviewer', createReviewerNode(llmClient))
@@ -55,19 +55,19 @@ export function buildPostGraph(llmClient: OpenRouterService) {
 
     .addEdge(START, 'orchestrator')
     .addConditionalEdges('orchestrator', routeToSpecialist, {
-      flutterSpecialist: 'flutterSpecialist',
+      iosSpecialist: 'iosSpecialist',
       nodeReactSpecialist: 'nodeReactSpecialist',
       aiSpecialist: 'aiSpecialist',
       imageExtractor: 'imageExtractor',
     })
 
-    .addEdge('flutterSpecialist', 'reviewer')
+    .addEdge('iosSpecialist', 'reviewer')
     .addEdge('nodeReactSpecialist', 'reviewer')
     .addEdge('aiSpecialist', 'reviewer')
 
     .addConditionalEdges('reviewer', routeAfterReview, {
       imageExtractor: 'imageExtractor',
-      flutterSpecialist: 'flutterSpecialist',
+      iosSpecialist: 'iosSpecialist',
       nodeReactSpecialist: 'nodeReactSpecialist',
       aiSpecialist: 'aiSpecialist',
     })

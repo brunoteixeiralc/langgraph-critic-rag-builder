@@ -20,7 +20,7 @@ function slugify(text: string): string {
 }
 
 function getExtension(niche?: string, code?: string): string {
-  if (niche === 'flutter_dart') return 'dart';
+  if (niche === 'ios') return 'swift';
   if (niche === 'ai_engineering') {
     if (code && (code.includes('import ') || code.includes('def ') || code.includes('print(')) && !code.includes('console.log')) {
       return 'py';
@@ -48,7 +48,7 @@ export function createImageExtractorNode() {
       const errorMsg = `The provided command is out of the technical scope supported by this application.
 Received command: "${state.initialCommand}"
 Classified niche: "out_of_scope"
-Valid niche names: "flutter_dart", "node_react", "ai_engineering".`;
+Valid niche names: "ios", "node_react", "ai_engineering".`;
       await fs.writeFile(textPath, errorMsg, 'utf-8');
       console.log(`[+] Error report saved to: ${textPath}`);
       console.log("\n✅ Process finished! Check the /output directory.\n");

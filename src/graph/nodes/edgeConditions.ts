@@ -8,7 +8,7 @@ export const routeToSpecialist = (state: GraphState): string => {
   if (!state.niche) return 'nodeReactSpecialist';
 
   const routes: Record<string, string> = {
-    flutter_dart: 'flutterSpecialist',
+    ios: 'iosSpecialist',
     node_react: 'nodeReactSpecialist',
     ai_engineering: 'aiSpecialist',
     out_of_scope: 'imageExtractor',

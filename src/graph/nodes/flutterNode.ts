@@ -5,15 +5,15 @@ import type { GraphState } from '../graph.ts';
 import { SpecialistOutputSchema } from './schemas.ts';
 import { extractUrls, fetchUrlContent } from '../../services/webContentService.ts';
 
-export function createFlutterNode(llmClient: OpenRouterService) {
+export function createIosNode(llmClient: OpenRouterService) {
   return async (state: GraphState, runtime?: Runtime): Promise<Partial<GraphState>> => {
-    console.log("[Flutter Specialist] Collecting RAG and generating draft...");
+    console.log("[iOS Specialist] Collecting RAG and generating draft...");
 
-    let ragContext = await ragService.retrieveContext(state.initialCommand, "flutter_dart");
+    let ragContext = await ragService.retrieveContext(state.initialCommand, "ios");
 
     if (state.reviewCount > 0 && state.reviewerSearchQuery) {
       console.log(`[Iterative RAG] Searching Pinecone context for: "${state.reviewerSearchQuery}"...`);
-      const correctiveContext = await ragService.retrieveContext(state.reviewerSearchQuery, "flutter_dart");
+      const correctiveContext = await ragService.retrieveContext(state.reviewerSearchQuery, "ios");
       if (correctiveContext) {
         ragContext = `${ragContext}\n\n[RAG Data (Correction)]: \n${correctiveContext}`;
       }
@@ -41,22 +41,22 @@ export function createFlutterNode(llmClient: OpenRouterService) {
       }
     }
 
-    const systemPrompt = `You are a Senior Mobile & Full Stack Software Engineer specializing in Flutter and Dart.
+    const systemPrompt = `You are a Senior iOS Engineer specializing in Swift and Apple's native app platform (SwiftUI, UIKit, Combine, Swift Concurrency).
 Persona: Pragmatic executor, over 6 years experience. PROHIBITED: Never use "Tech Lead" or management titles. Avoid hype words.
 
 CODE & IMAGE INFERENCE (CRITICAL):
 - Carefully analyze the user prompt ("Topic") to infer whether code examples are needed:
   * IF THE PROMPT EXPLICITLY OR IMPLICITLY DEMANDS CODE (e.g. mentions "code examples", "how to write", "create code", "show implementation", "with code", "example of", or if the topic intrinsically requires a code snippet to be practical and useful for developers):
     1. DO NOT output raw markdown code blocks in the text draft. Replace code with [CODE_SNIPPET_1], [CODE_SNIPPET_2], etc. inside the text draft.
-    2. Provide the complete, compilable, raw Dart/Flutter source code in the 'codeSnippets' array matching each placeholder.
+    2. Provide the complete, compilable, raw Swift source code in the 'codeSnippets' array matching each placeholder.
   * IF THE PROMPT IS CONCEPTUAL, ARCHITECTURAL, HIGH-LEVEL, OR ASKS FOR TEXT-ONLY (or if code snippets would be forced, trivial, or unnecessary):
     1. Write a compelling, technical text-only draft. DO NOT include any [CODE_SNIPPET_X] placeholders in the text draft.
     2. Set 'codeSnippets' to an empty array ([]).
 
 STRICT GROUNDING & ANTI-HALLUCINATION:
 1. Ground your knowledge in the provided data sources ([WEB_DATA], [RAG Data]). These override your internal training data.
-2. Never invent APIs, methods, library/package versions, or parameters. If uncertain about a version number, use general phrasing (e.g., "In recent versions of Flutter...") instead of guessing.
-3. All code snippets in 'codeSnippets' must be complete, syntactically valid Dart/Flutter code. Do not use unresolved ellipses (...) or undefined placeholders inside code blocks. Code must be clean, readable, and directly copy-pasteable.
+2. Never invent APIs, methods, framework/SDK versions, or parameters. If uncertain about a version number, use general phrasing (e.g., "In recent versions of iOS...") instead of guessing.
+3. All code snippets in 'codeSnippets' must be complete, syntactically valid Swift code. Do not use unresolved ellipses (...) or undefined placeholders inside code blocks. Code must be clean, readable, and directly copy-pasteable.
 
 KNOWLEDGE CUTOFF AWARENESS (CRITICAL):
 4. Your training data has a cutoff date. You may be unaware of recent releases, announcements, or ecosystem changes. NEVER assume something does not exist just because you have no knowledge of it.
@@ -65,8 +65,8 @@ KNOWLEDGE CUTOFF AWARENESS (CRITICAL):
 7. If no [WEB_DATA] is available and the topic involves a recent release or announcement you cannot confidently confirm from training, explicitly write in the draft: "[FACT-CHECK REQUIRED: This information is based on training data and may be outdated. Please verify against the official source.]"
 
 VERBATIM CITATION FOR TECHNICAL SPECIFICS (CRITICAL):
-8. For CLI command flags (e.g. pub flags), package names, installation commands, and hyperlinks/URLs: copy them VERBATIM from [WEB_DATA]. Never paraphrase, rename, or invent them. If the exact name or URL is not explicitly present in [WEB_DATA], DO NOT include it — use general phrasing instead.
-9. For benchmark numbers (e.g., compile speeds, framerates): cite only numbers that appear explicitly in [WEB_DATA]. Do not round, interpolate, or extrapolate values.
+8. For CLI/build flags (e.g. xcodebuild, Swift Package Manager flags), package names, installation commands, and hyperlinks/URLs: copy them VERBATIM from [WEB_DATA]. Never paraphrase, rename, or invent them. If the exact name or URL is not explicitly present in [WEB_DATA], DO NOT include it — use general phrasing instead.
+9. For benchmark numbers (e.g., build times, frame rates, memory footprint): cite only numbers that appear explicitly in [WEB_DATA]. Do not round, interpolate, or extrapolate values.
 10. If [WEB_DATA] content appears noisy, truncated, or HTML-heavy, extract only the article body paragraphs. If you cannot confidently identify what the source claims about a specific technical detail, omit that detail rather than guessing.`;
 
     let userPrompt = `Topic:\n"${state.initialCommand}"\n\n`;
@@ -75,7 +75,7 @@ VERBATIM CITATION FOR TECHNICAL SPECIFICS (CRITICAL):
     }
     if (ragContext) userPrompt += `[RAG Data]:\n${ragContext}\n\n`;
     if (state.mcpContext) userPrompt += `[MCP Data]:\n${state.mcpContext}\n\n`;
-    
+
     if (state.reviewCount > 0 && state.reviewFeedback) {
       const hasSurgical = state.approvedContent || (state.corrections && state.corrections.length > 0);
 
@@ -107,9 +107,9 @@ ${state.corrections && state.corrections.length > 0
     }
 
     const result = await llmClient.generateStructured(systemPrompt, userPrompt, SpecialistOutputSchema);
-    
-    if (!result.success || !result.data) throw new Error("Failed to generate Flutter draft.");
-    
+
+    if (!result.success || !result.data) throw new Error("Failed to generate iOS draft.");
+
     return {
       ragContext: ragContext,
       webData: webData || undefined,
