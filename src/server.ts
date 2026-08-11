@@ -74,6 +74,14 @@ app.post('/generate', requireApiKey, async (req: Request, res: Response) => {
       finalPostText: result.finalPostText || null,
       hashtags: result.hashtags ?? [],
       codeSnippets: result.codeSnippets ?? [],
+      // Rendered Carbonara PNGs, base64-encoded as data URIs. The container's
+      // filesystem is ephemeral (no Volume attached), so this is the only
+      // way to get the images back — decode client-side or drop straight
+      // into an <img src="..."> / <!doctype html> preview.
+      codeImages: (result.codeImages ?? []).map((img) => ({
+        filename: img.filename,
+        dataUri: `data:image/png;base64,${img.base64}`,
+      })),
       reviewCount: result.reviewCount,
       reviewFeedback: result.reviewFeedback || null,
       // Only included when the review loop was exhausted without approval —

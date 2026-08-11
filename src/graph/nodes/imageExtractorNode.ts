@@ -95,6 +95,11 @@ Valid niche names: "flutter_dart", "node_react", "ai_engineering".`;
       console.log(`[+] Draft saved (review limit reached): ${textPath}`);
     }
 
+    // Populated below alongside the on-disk PNGs. Kept in state so callers
+    // that can't rely on the container's filesystem persisting (e.g. the
+    // HTTP wrapper in src/server.ts) can still get the rendered images back.
+    const codeImages: { index: number; filename: string; base64: string }[] = [];
+
     if (state.codeSnippets && state.codeSnippets.length > 0) {
       for (let i = 0; i < state.codeSnippets.length; i++) {
         let codeContent = state.codeSnippets[i];
@@ -135,8 +140,11 @@ Valid niche names: "flutter_dart", "node_react", "ai_engineering".`;
 
           if (response.ok) {
             const buffer = await response.arrayBuffer();
-            const imgPath = path.join(outputDir, `snippet_${i + 1}.png`);
-            await fs.writeFile(imgPath, Buffer.from(buffer));
+            const pngBuffer = Buffer.from(buffer);
+            const filename = `snippet_${i + 1}.png`;
+            const imgPath = path.join(outputDir, filename);
+            await fs.writeFile(imgPath, pngBuffer);
+            codeImages.push({ index: i + 1, filename, base64: pngBuffer.toString('base64') });
             console.log(`[+] Code image saved: ${imgPath}`);
           } else {
             const responseBody = await response.text().catch(() => 'Unable to read response body');
@@ -150,6 +158,6 @@ Valid niche names: "flutter_dart", "node_react", "ai_engineering".`;
       }
     }
     console.log("\n✅ Process finished! Check the /output directory.\n");
-    return { reviewCount: 0 };
+    return { reviewCount: 0, codeImages: codeImages.length > 0 ? codeImages : undefined };
   };
 }

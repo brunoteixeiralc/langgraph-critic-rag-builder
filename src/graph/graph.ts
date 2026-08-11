@@ -31,6 +31,15 @@ export const PostStateAnnotation = z.object({
   finalPostText: z.string().optional(),
   hashtags: z.array(z.string()).optional(),
   reviewCount: z.number().default(0),
+  // Populated by imageExtractorNode with the rendered Carbonara PNGs
+  // (base64-encoded) alongside writing them to disk. Consumers that can't
+  // rely on the local filesystem persisting (e.g. an HTTP wrapper deployed
+  // to an ephemeral container) can read the images straight from state.
+  codeImages: z.array(z.object({
+    index: z.number(),
+    filename: z.string(),
+    base64: z.string(),
+  })).optional(),
 });
 
 export type GraphState = z.infer<typeof PostStateAnnotation>;
