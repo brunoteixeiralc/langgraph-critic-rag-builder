@@ -21,6 +21,14 @@
  * one instance won't be visible from another, and you'd need to move this
  * to Redis/Postgres or sticky sessions).
  *
+ * IMAGES SERVED SEPARATELY: rendered Carbonara PNGs are NOT inlined as
+ * base64 inside the /result/:jobId JSON. A single snippet image can be
+ * 100KB+, which base64-inflates by ~33% and can push the JSON response past
+ * 1MB. Some networks (corporate proxies especially) mangle or truncate large
+ * response bodies — we hit exactly that. So /result/:jobId only returns a
+ * `url` per image, and GET /result/:jobId/images/:filename serves the raw
+ * PNG bytes directly (small, normal binary response, no proxy weirdness).
+ *
  * Local dev:  npm run server:dev   (loads .env)
  * Deployed:   npm run server       (env vars come from the platform, e.g. Railway)
  */
@@ -54,12 +62,15 @@ function requireApiKey(req: Request, res: Response, next: NextFunction) {
 
 type JobStatus = 'pending' | 'running' | 'done' | 'error';
 
+type StoredImage = { filename: string; base64: string };
+
 type Job = {
   status: JobStatus;
   topic: string;
   createdAt: number;
   updatedAt: number;
   result?: Record<string, unknown>;
+  images?: StoredImage[];
   error?: string;
 };
 
@@ -73,22 +84,27 @@ setInterval(() => {
   }
 }, 15 * 60 * 1000).unref(); // sweep every 15min; unref so it doesn't keep the process alive on its own
 
-function serializeGraphResult(result: Awaited<ReturnType<ReturnType<typeof buildPostGraph>['invoke']>>) {
+function serializeGraphResult(
+  jobId: string,
+  result: Awaited<ReturnType<ReturnType<typeof buildPostGraph>['invoke']>>,
+): { json: Record<string, unknown>; images: StoredImage[] } {
   const approved = Boolean(result.finalPostText);
-  return {
+  const images: StoredImage[] = (result.codeImages ?? []).map((img) => ({
+    filename: img.filename,
+    base64: img.base64,
+  }));
+
+  const json = {
     niche: result.niche ?? null,
     folderSlug: result.suggestedFolderSlug ?? null,
     approved,
     finalPostText: result.finalPostText || null,
     hashtags: result.hashtags ?? [],
     codeSnippets: result.codeSnippets ?? [],
-    // Rendered Carbonara PNGs, base64-encoded as data URIs. The container's
-    // filesystem is ephemeral (no Volume attached), so this is the only way
-    // to get the images back — decode client-side or drop straight into an
-    // <img src="..."> / HTML preview.
-    codeImages: (result.codeImages ?? []).map((img) => ({
+    // Fetch each rendered PNG separately — see file header for why.
+    codeImages: images.map((img) => ({
       filename: img.filename,
-      dataUri: `data:image/png;base64,${img.base64}`,
+      url: `/result/${jobId}/images/${encodeURIComponent(img.filename)}`,
     })),
     reviewCount: result.reviewCount,
     reviewFeedback: result.reviewFeedback || null,
@@ -96,6 +112,8 @@ function serializeGraphResult(result: Awaited<ReturnType<ReturnType<typeof build
     // mirrors the "⚠️ WARNING" file that imageExtractorNode writes locally.
     unapprovedDraft: !approved ? (result.technicalDraft || null) : undefined,
   };
+
+  return { json, images };
 }
 
 // --- Routes ------------------------------------------------------------
@@ -132,8 +150,10 @@ app.post('/generate', requireApiKey, (req: Request, res: Response) => {
       const graph = buildPostGraph(llmClient);
       const result = await graph.invoke({ initialCommand: topic, reviewCount: 0 });
 
+      const { json, images } = serializeGraphResult(jobId, result);
       job.status = 'done';
-      job.result = serializeGraphResult(result);
+      job.result = json;
+      job.images = images;
       job.updatedAt = Date.now();
       console.log(`[Server] job ${jobId} done.`);
     } catch (err) {
@@ -168,6 +188,25 @@ app.get('/result/:jobId', requireApiKey, (req: Request, res: Response) => {
   }
 
   res.status(200).json({ status: 'done', topic: job.topic, ...job.result });
+});
+
+app.get('/result/:jobId/images/:filename', requireApiKey, (req: Request, res: Response) => {
+  const jobId = String(req.params.jobId);
+  const filename = String(req.params.filename);
+  const job = jobs.get(jobId);
+
+  if (!job) {
+    res.status(404).json({ error: 'Unknown or expired jobId.' });
+    return;
+  }
+
+  const image = job.images?.find((img) => img.filename === filename);
+  if (!image) {
+    res.status(404).json({ error: 'No such image for this job.' });
+    return;
+  }
+
+  res.status(200).set('Content-Type', 'image/png').send(Buffer.from(image.base64, 'base64'));
 });
 
 app.listen(PORT, '0.0.0.0', () => {
