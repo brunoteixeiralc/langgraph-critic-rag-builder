@@ -327,6 +327,13 @@ async function addDocumentsWithRetry(
 }
 
 async function main() {
+  // Ingestion fires many rapid Gemini embedding calls in a tight loop —
+  // tracing each one floods LangSmith with low-value noise. Disable tracing
+  // just for this script; the actual multi-agent graph runs (src/server.ts,
+  // local `npm start`) still get traced normally via the LANGSMITH_* vars.
+  process.env.LANGSMITH_TRACING = 'false';
+  process.env.LANGCHAIN_TRACING_V2 = 'false';
+
   const nicheFilter = parseNicheFilter();
   const force = parseForceFlag();
 
