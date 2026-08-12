@@ -27,9 +27,17 @@
  * of duplicating them. If a source shrinks (fewer chunks than last time),
  * the leftover old chunks are deleted at the end of that source's run.
  *
+ * Free-tier friendly: a local manifest (src/scripts/.ingest-manifest.json)
+ * remembers the content hash of every source already embedded. On the next
+ * run, unchanged sources are skipped entirely — no embedding call is made —
+ * which matters a lot on Gemini's free tier (low TPM quota). Use --force to
+ * bypass the manifest and re-embed everything (e.g. after recreating the
+ * Pinecone index).
+ *
  * Usage:
- *   npm run ingest              # ingest everything in sources.json
+ *   npm run ingest                  # ingest everything in sources.json (skips unchanged)
  *   npm run ingest -- --niche=ios   # ingest only one niche
+ *   npm run ingest -- --force       # ignore the manifest, re-embed everything
  *
  * Requires PINECONE_API_KEY, PINECONE_INDEX_NAME, GEMINI_API_KEY in .env
  * (same as the running app). The Pinecone index must already exist — this
@@ -55,7 +63,11 @@ type GithubContentEntry = {
   download_url: string | null;
 };
 
+type ManifestEntry = { contentHash: string; chunkCount: number; ingestedAt: string };
+type Manifest = Record<string, ManifestEntry>; // source URL -> last-ingested state
+
 const SOURCES_PATH = path.join(process.cwd(), 'src/scripts/sources.json');
+const MANIFEST_PATH = path.join(process.cwd(), 'src/scripts/.ingest-manifest.json');
 const NAMESPACE = 'posts-content'; // must match ragService.ts
 
 // Character-based chunking (no tokenizer dependency). ~3000 chars is roughly
@@ -72,9 +84,10 @@ const MAX_PAGE_CHARS = 300_000;
 const MIN_CONTENT_FOR_SINGLE_PAGE = 500;
 
 // Safety caps so one config line can't silently trigger thousands of
-// embedding calls (cost + time).
-const GITHUB_TREE_FILE_CAP = 40;
-const INDEX_CHILD_LINK_CAP = 40;
+// embedding calls (cost + time). Kept conservative to stay comfortably
+// inside Gemini's free-tier TPM quota — raise if you've moved to a paid tier.
+const GITHUB_TREE_FILE_CAP = 15;
+const INDEX_CHILD_LINK_CAP = 15;
 
 // Gemini's free-tier embedding quota is easy to blow through when ingesting
 // many sources back-to-back — specifically TPM (tokens/minute), not RPM.
@@ -119,6 +132,27 @@ function chunkId(source: string, index: number): string {
 function parseNicheFilter(): string | null {
   const arg = process.argv.find((a) => a.startsWith('--niche='));
   return arg ? arg.split('=')[1] : null;
+}
+
+function parseForceFlag(): boolean {
+  return process.argv.includes('--force');
+}
+
+function contentHash(content: string): string {
+  return createHash('sha256').update(content).digest('hex');
+}
+
+async function loadManifest(): Promise<Manifest> {
+  try {
+    const raw = await fs.readFile(MANIFEST_PATH, 'utf-8');
+    return JSON.parse(raw) as Manifest;
+  } catch {
+    return {}; // no manifest yet — first run, or it was deleted
+  }
+}
+
+async function saveManifest(manifest: Manifest): Promise<void> {
+  await fs.writeFile(MANIFEST_PATH, JSON.stringify(manifest, null, 2), 'utf-8');
 }
 
 /**
@@ -294,9 +328,14 @@ async function addDocumentsWithRetry(
 
 async function main() {
   const nicheFilter = parseNicheFilter();
+  const force = parseForceFlag();
 
   const raw = await fs.readFile(SOURCES_PATH, 'utf-8');
   const sources: SourcesConfig = JSON.parse(raw);
+  const manifest = await loadManifest();
+  if (force) {
+    console.log('[Ingest] --force set: ignoring manifest, re-embedding everything.');
+  }
 
   if (!process.env.PINECONE_API_KEY || !process.env.PINECONE_INDEX_NAME || !process.env.GEMINI_API_KEY) {
     console.error('❌ Missing PINECONE_API_KEY, PINECONE_INDEX_NAME, or GEMINI_API_KEY in .env. Aborting.');
@@ -317,6 +356,7 @@ async function main() {
   let totalChunks = 0;
   let totalSources = 0;
   let totalSkipped = 0;
+  let totalUnchanged = 0;
 
   for (const [niche, urls] of Object.entries(sources)) {
     if (nicheFilter && niche !== nicheFilter) continue;
@@ -335,6 +375,14 @@ async function main() {
       }
 
       for (const { source, content } of resolved) {
+        const hash = contentHash(content);
+        const cached = manifest[source];
+        if (!force && cached && cached.contentHash === hash) {
+          console.log(`[Ingest] ⏭️  Unchanged since last ingest, skipping embedding call: ${source}`);
+          totalUnchanged++;
+          continue;
+        }
+
         const chunks = chunkText(content, CHUNK_SIZE, CHUNK_OVERLAP);
         const docs = chunks.map(
           (chunk, i) =>
@@ -367,12 +415,16 @@ async function main() {
         console.log(`[Ingest] ✅ Upserted ${docs.length} chunk(s) for: ${source}`);
         totalChunks += docs.length;
         totalSources++;
+
+        manifest[source] = { contentHash: hash, chunkCount: chunks.length, ingestedAt: new Date().toISOString() };
+        await saveManifest(manifest); // persist incrementally so a crash mid-run doesn't lose already-embedded progress
+
         await sleep(INTER_SOURCE_DELAY_MS);
       }
     }
   }
 
-  console.log(`\n✅ Ingestion complete. ${totalSources} source(s) processed, ${totalChunks} chunk(s) upserted, ${totalSkipped} skipped.`);
+  console.log(`\n✅ Ingestion complete. ${totalSources} source(s) embedded, ${totalChunks} chunk(s) upserted, ${totalUnchanged} unchanged (skipped), ${totalSkipped} failed.`);
 }
 
 main().catch((err) => {
