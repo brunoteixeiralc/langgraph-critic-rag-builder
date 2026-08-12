@@ -52,7 +52,7 @@ Valid niche names: "ios", "node_react", "ai_engineering".`;
       await fs.writeFile(textPath, errorMsg, 'utf-8');
       console.log(`[+] Error report saved to: ${textPath}`);
       console.log("\n✅ Process finished! Check the /output directory.\n");
-      return { reviewCount: 0 };
+      return {};
     }
 
     // Critical failure = the review loop was cut off at MAX_REVIEW_ATTEMPTS,
@@ -79,7 +79,7 @@ Valid niche names: "ios", "node_react", "ai_engineering".`;
       await fs.writeFile(errorPath, errorMsg, 'utf-8');
       console.log(`[+] Error report saved: ${errorPath}`);
       console.log('\n✅ Process finished with errors. Check error_report.txt.\n');
-      return { reviewCount: 0 };
+      return {};
     } else if (state.finalPostText) {
       const hashtagsStr = state.hashtags ? `\n\n${state.hashtags.join(' ')}` : '';
       const textPath = path.join(outputDir, 'linkedin_post.txt');
@@ -158,6 +158,6 @@ Valid niche names: "ios", "node_react", "ai_engineering".`;
       }
     }
     console.log("\n✅ Process finished! Check the /output directory.\n");
-    return { reviewCount: 0, codeImages: codeImages.length > 0 ? codeImages : undefined };
+    return { codeImages: codeImages.length > 0 ? codeImages : undefined };
   };
 }
