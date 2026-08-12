@@ -76,6 +76,19 @@ const MIN_CONTENT_FOR_SINGLE_PAGE = 500;
 const GITHUB_TREE_FILE_CAP = 40;
 const INDEX_CHILD_LINK_CAP = 40;
 
+// Gemini's free-tier embedding quota is easy to blow through when ingesting
+// many sources back-to-back. When that happens, LangChain's embeddings
+// wrapper can swallow the underlying 429 and hand Pinecone an empty vector,
+// which surfaces as a confusing "Vector dimension 0" error instead of a
+// clear rate-limit message. Retry with backoff, and pace requests out.
+const EMBED_RETRY_ATTEMPTS = 4;
+const EMBED_RETRY_BASE_MS = 4000; // 4s, 8s, 12s
+const INTER_SOURCE_DELAY_MS = 500;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 const GITHUB_TREE_RE = /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/tree\/([^/]+)\/(.+)$/;
 
 function chunkText(text: string, chunkSize: number, overlap: number): string[] {
@@ -239,6 +252,36 @@ async function resolveSources(url: string): Promise<ResolvedSource[]> {
   return directContent ? [{ source: url, content: directContent }] : [];
 }
 
+/**
+ * Upserts one source's chunks with retry+backoff. Returns false (instead of
+ * throwing) if all attempts fail, so the caller can skip this source and
+ * keep processing the rest of the run instead of losing all prior progress.
+ */
+async function addDocumentsWithRetry(
+  vectorStore: PineconeStore,
+  docs: Document[],
+  ids: string[],
+  source: string,
+): Promise<boolean> {
+  for (let attempt = 1; attempt <= EMBED_RETRY_ATTEMPTS; attempt++) {
+    try {
+      await vectorStore.addDocuments(docs, ids);
+      return true;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const isLastAttempt = attempt === EMBED_RETRY_ATTEMPTS;
+      if (isLastAttempt) {
+        console.error(`[Ingest] ❌ Failed to upsert "${source}" after ${attempt} attempt(s): ${message}`);
+        return false;
+      }
+      const delay = EMBED_RETRY_BASE_MS * attempt;
+      console.warn(`[Ingest] ⚠️  Upsert error for "${source}" (attempt ${attempt}/${EMBED_RETRY_ATTEMPTS}, likely embedding rate limit) — retrying in ${delay}ms: ${message}`);
+      await sleep(delay);
+    }
+  }
+  return false;
+}
+
 async function main() {
   const nicheFilter = parseNicheFilter();
 
@@ -292,7 +335,12 @@ async function main() {
         );
         const ids = chunks.map((_, i) => chunkId(source, i));
 
-        await vectorStore.addDocuments(docs, ids);
+        const ok = await addDocumentsWithRetry(vectorStore, docs, ids, source);
+        if (!ok) {
+          totalSkipped++;
+          await sleep(INTER_SOURCE_DELAY_MS);
+          continue;
+        }
 
         // Clean up leftover chunks from a previous, longer version of this
         // same source (e.g. if the page shrank from 8 chunks to 5, delete the
@@ -309,6 +357,7 @@ async function main() {
         console.log(`[Ingest] ✅ Upserted ${docs.length} chunk(s) for: ${source}`);
         totalChunks += docs.length;
         totalSources++;
+        await sleep(INTER_SOURCE_DELAY_MS);
       }
     }
   }
