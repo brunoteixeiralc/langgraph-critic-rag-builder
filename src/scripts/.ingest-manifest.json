@@ -1,0 +1,87 @@
+{
+  "https://developer.apple.com/documentation/swift/concurrency": {
+    "contentHash": "a5c2f78b772b411e2e26beb9da5e76a2182b2bb55a03cc7b3697ed50f3b9642b",
+    "chunkCount": 1,
+    "ingestedAt": "2026-08-12T14:25:04.281Z"
+  },
+  "https://raw.githubusercontent.com/swiftlang/swift-evolution/main/proposals/0544-mutate-or-consume-in-deinit.md": {
+    "contentHash": "339dcedc5312d41f7de7c6bfc47d4d3fac40b30bb05efa396096e65aaeea3365",
+    "chunkCount": 4,
+    "ingestedAt": "2026-08-12T14:25:12.074Z"
+  },
+  "https://raw.githubusercontent.com/swiftlang/swift-evolution/main/proposals/0543-inline-array-hashable.md": {
+    "contentHash": "8b97121127b49f909952c8b0cb212362abb835f1535bf714ab02f0a494c86029",
+    "chunkCount": 1,
+    "ingestedAt": "2026-08-12T14:25:14.632Z"
+  },
+  "https://raw.githubusercontent.com/swiftlang/swift-evolution/main/proposals/0542-package-manager-conditional-plugin.md": {
+    "contentHash": "1c8ef9a280d6a465a0d1de547e72654a4f2bc5a8af5fbb12eb214ff2d3fb3779",
+    "chunkCount": 7,
+    "ingestedAt": "2026-08-12T14:25:17.905Z"
+  },
+  "https://raw.githubusercontent.com/swiftlang/swift-evolution/main/proposals/0541-flexible-swift-c-interoperability-for-packages.md": {
+    "contentHash": "b96e1fe71d7cad942e74be10be9464f419eb05ab7b9b51eb98420ad958cec0b7",
+    "chunkCount": 8,
+    "ingestedAt": "2026-08-12T14:25:21.204Z"
+  },
+  "https://raw.githubusercontent.com/swiftlang/swift-evolution/main/proposals/0540-default-target-settings.md": {
+    "contentHash": "a49645c438c1db49b41d56090d1e61d5002c72a73eb252c15a33d8f78b683ed0",
+    "chunkCount": 5,
+    "ingestedAt": "2026-08-12T14:25:24.083Z"
+  },
+  "https://raw.githubusercontent.com/swiftlang/swift-evolution/main/proposals/0539-self-access-for-property-initializers.md": {
+    "contentHash": "894682fbc2c20adb737620544be0fd6e776cfea717d2703b214accb37bad1a05",
+    "chunkCount": 6,
+    "ingestedAt": "2026-08-12T14:25:27.071Z"
+  },
+  "https://raw.githubusercontent.com/swiftlang/swift-evolution/main/proposals/0538-disconnected.md": {
+    "contentHash": "15d3a33b4af5cb2b59acd6c31985300d0a27efec69f056ec217c5549d3bdc3c4",
+    "chunkCount": 9,
+    "ingestedAt": "2026-08-12T14:25:30.260Z"
+  },
+  "https://raw.githubusercontent.com/swiftlang/swift-evolution/main/proposals/0537-function-sections.md": {
+    "contentHash": "3033e74044d3cce3fab45b35dc72cc471cbfaaa22ec7c0ae3433b309465c7186",
+    "chunkCount": 3,
+    "ingestedAt": "2026-08-12T14:25:32.973Z"
+  },
+  "https://raw.githubusercontent.com/swiftlang/swift-evolution/main/proposals/0536-registry-search.md": {
+    "contentHash": "1668208c6b9b30bd52c7bcdf600ec569295852bf8b17f8ab104c195f54f0b04c",
+    "chunkCount": 10,
+    "ingestedAt": "2026-08-12T14:25:36.334Z"
+  },
+  "https://raw.githubusercontent.com/swiftlang/swift-evolution/main/proposals/0535-global-mirrors-configuration-cli.md": {
+    "contentHash": "70b7499c0a0c35d644321c92a48014a08fcda987849bf5466b2e36489baf3946",
+    "chunkCount": 3,
+    "ingestedAt": "2026-08-12T14:25:39.055Z"
+  },
+  "https://raw.githubusercontent.com/swiftlang/swift-evolution/main/proposals/0534-swiftpm-exact-literal-version-matching.md": {
+    "contentHash": "7b440f0840e288e2c8451b5b6ffa1c8fa0807385f0feb004a37770d9af52cb42",
+    "chunkCount": 3,
+    "ingestedAt": "2026-08-12T14:25:41.778Z"
+  },
+  "https://raw.githubusercontent.com/swiftlang/swift-evolution/main/proposals/0533-reasync-macros.md": {
+    "contentHash": "9db2427cfa473211fab8af7d37e1e98be277b4df1b96c6279a950e117d35d1a2",
+    "chunkCount": 22,
+    "ingestedAt": "2026-08-12T14:25:45.566Z"
+  },
+  "https://raw.githubusercontent.com/swiftlang/swift-evolution/main/proposals/0532-optional-noncopyable-improvements.md": {
+    "contentHash": "b766f4e1289fe0f2f466f2f1e3b86a326a9fde498f666c2a1bf2aac037ebb728",
+    "chunkCount": 5,
+    "ingestedAt": "2026-08-12T14:25:48.472Z"
+  },
+  "https://raw.githubusercontent.com/swiftlang/swift-evolution/main/proposals/0531-literal-expressions.md": {
+    "contentHash": "d252027ab73dc0f72dd4cf236220f2034c6c4ba036c4fd7a207f04cb94e660ab",
+    "chunkCount": 8,
+    "ingestedAt": "2026-08-12T14:25:51.604Z"
+  },
+  "https://raw.githubusercontent.com/swiftlang/swift-evolution/main/proposals/0530-async-result-support.md": {
+    "contentHash": "26e1afb40205ede56eef125a6dc2a8bfdd403fb03b6223d31cfe62b1728f8a7a",
+    "chunkCount": 1,
+    "ingestedAt": "2026-08-12T14:25:54.137Z"
+  },
+  "https://developer.apple.com/documentation/xcode-release-notes/": {
+    "contentHash": "e2c072d31d5d96db2a6c706c3576beb736dc6512fa84431eed936f98b5692c97",
+    "chunkCount": 1,
+    "ingestedAt": "2026-08-12T14:25:57.290Z"
+  }
+}
