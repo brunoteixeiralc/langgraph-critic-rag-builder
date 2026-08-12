@@ -108,7 +108,7 @@ ${state.corrections && state.corrections.length > 0
 
     const result = await llmClient.generateStructured(systemPrompt, userPrompt, SpecialistOutputSchema);
 
-    if (!result.success || !result.data) throw new Error("Failed to generate iOS draft.");
+    if (!result.success || !result.data) throw new Error(`Failed to generate iOS draft: ${result.error || 'unknown error'}`);
 
     return {
       ragContext: ragContext,

@@ -109,7 +109,7 @@ ${state.corrections && state.corrections.length > 0
 
     const result = await llmClient.generateStructured(systemPrompt, userPrompt, SpecialistOutputSchema);
 
-    if (!result.success || !result.data) throw new Error("Failed to generate AI Engineering draft.");
+    if (!result.success || !result.data) throw new Error(`Failed to generate AI Engineering draft: ${result.error || 'unknown error'}`);
 
     return {
       ragContext: ragContext,
