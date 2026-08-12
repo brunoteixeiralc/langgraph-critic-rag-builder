@@ -23,7 +23,12 @@ export const config: ModelConfig = {
   httpReferer: process.env.OPENROUTER_HTTP_REFERER || '',
   xTitle: process.env.OPENROUTER_X_TITLE || 'IA Devs - Prompt Chaining Article Generator',
   models: [
-    'qwen/qwen3-coder-next',
+    'qwen/qwen3-coder-next', // primary
+    // Fallbacks — OpenRouter tries these in order if the primary is
+    // rate-limited/unavailable (this is on top of the retry-with-backoff in
+    // openrouterService.ts, which retries the primary a few times first).
+    'nvidia/nemotron-3.5-lightning:free', // 30B MoE (3B active), 1M context, built for agentic/structured workloads
+    'liquid/lfm-2.5-2.6b:free', // small (2.6B), last resort — Liquid AI advises against heavy coding tasks with it
     // https://openrouter.ai/models?fmt=cards&max_price=0&order=throughput-high-to-low&supported_parameters=structured_outputs%2Cresponse_format
     // 'upstage/solar-pro-3:free',
     // 'gpt-oss-120b:free',
