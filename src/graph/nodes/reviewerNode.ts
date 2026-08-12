@@ -4,6 +4,30 @@ import type { GraphState } from '../graph.ts';
 import { ReviewerOutputSchema } from './schemas.ts';
 import { MAX_REVIEW_ATTEMPTS } from './edgeConditions.ts';
 
+// Sometimes the specialist LLM echoes the "[CODE_SNIPPET_N]" placeholder
+// token itself (or leaves it empty) as the actual codeSnippets[N-1] value,
+// instead of writing real code. imageExtractorNode then strips the
+// placeholder prefix, is left with an empty string, and silently skips
+// image generation — so the post gets published with no code image and
+// nobody notices. This is a mechanical, deterministic failure (not a
+// judgement call), so we catch it with a regex instead of hoping the LLM
+// reviewer notices it in the middle of a long code review.
+const EMPTY_OR_PLACEHOLDER_ONLY_RE = /^\[CODE_SNIPPET_\d+\]:?\s*$/i;
+const PLACEHOLDER_PREFIX_RE = /^\[CODE_SNIPPET_\d+\]:?\s*/i;
+
+function findBrokenCodeSnippets(codeSnippets?: string[]): number[] {
+  if (!codeSnippets || codeSnippets.length === 0) return [];
+  const broken: number[] = [];
+  codeSnippets.forEach((snippet, i) => {
+    const trimmed = (snippet ?? '').trim();
+    const strippedOfPrefix = trimmed.replace(PLACEHOLDER_PREFIX_RE, '').trim();
+    if (!strippedOfPrefix || EMPTY_OR_PLACEHOLDER_ONLY_RE.test(trimmed)) {
+      broken.push(i + 1); // 1-indexed to match [CODE_SNIPPET_N] naming
+    }
+  });
+  return broken;
+}
+
 export function createReviewerNode(llmClient: OpenRouterService) {
   return async (state: GraphState, runtime?: Runtime): Promise<Partial<GraphState>> => {
     console.log(`[Reviewer] Auditing draft (Attempt ${state.reviewCount + 1}/${MAX_REVIEW_ATTEMPTS})...`);
@@ -16,6 +40,19 @@ export function createReviewerNode(llmClient: OpenRouterService) {
     // imageExtractorNode decide whether the draft is salvageable.
     if (state.reviewCount >= MAX_REVIEW_ATTEMPTS) {
       return { reviewFeedback: '' };
+    }
+
+    const brokenSnippets = findBrokenCodeSnippets(state.codeSnippets);
+    if (brokenSnippets.length > 0) {
+      console.warn(`[Reviewer] ⚠️  Deterministic check: codeSnippets [${brokenSnippets.join(', ')}] are empty or placeholder-only (specialist echoed the token instead of writing code). Forcing a corrective retry without an LLM call.`);
+      const list = brokenSnippets.map((n) => `codeSnippets[${n - 1}]`).join(', ');
+      return {
+        reviewFeedback: `Snippet(s) #${brokenSnippets.join(', #')} were left as empty placeholders instead of real code — you output the literal "[CODE_SNIPPET_N]" token (or nothing) as the codeSnippets entry instead of actual source. In your next 'codeSnippets' array, you MUST replace ${list} with complete, compilable code implementing what the draft describes for that snippet. Every codeSnippets entry must contain real code, never the placeholder token or an empty string.`,
+        reviewerSearchQuery: '',
+        approvedContent: state.technicalDraft || undefined,
+        corrections: undefined,
+        reviewCount: state.reviewCount + 1,
+      };
     }
 
     const systemPrompt = `You are an Expert LinkedIn SSI Strategist. Format technical drafts for max engagement.
