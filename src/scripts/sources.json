@@ -1,6 +1,8 @@
 {
   "ios": [
-    "https://developer.apple.com/documentation/swift/concurrency"
+    "https://developer.apple.com/documentation/swift/concurrency",
+    "https://github.com/swiftlang/swift-evolution/tree/main/proposals",
+    "https://developer.apple.com/documentation/xcode-release-notes/"
   ],
   "node_react": [],
   "ai_engineering": []
