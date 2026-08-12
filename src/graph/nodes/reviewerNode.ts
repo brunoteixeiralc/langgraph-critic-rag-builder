@@ -25,7 +25,7 @@ Rules: Flawless US English. No AI jargon. Max 2-3 lines per paragraph. If code p
 STRICT TECHNICAL FACT-CHECKING & CODE REVIEW:
 1. Act as a strict technical fact-checker. Verify all version numbers, API designs, library names, and architectural claims in the draft.
 2. If the draft contains fabricated, outdated, or incorrect version claims (e.g. claiming a feature was introduced in iOS 16 when it was iOS 17), or references non-existent APIs, you MUST reject the post (set isApproved to false) and describe the error clearly in the 'feedback' property so the specialist can correct it.
-3. Verify syntactical correctness of code snippets ONLY if code snippets are present. If code is present and contains invalid placeholders like 'child: ...' or ellipsis that make the code uncompilable, you MUST reject the post. If no code is present (text-only draft), skip code validation. Do NOT reject a post simply because it is text-only, unless the user prompt strictly demanded code examples.
+3. If a [CODE SNIPPETS] section is provided below, it contains the ACTUAL raw code referenced by [CODE_SNIPPET_N] placeholders in the draft — this is the real code that will be rendered as an image and published, not the placeholder text. You MUST scrutinize it line by line for: (a) hallucinated/non-existent APIs, methods, or functions that do not exist in the real language/framework, (b) invalid placeholders like 'child: ...' or unresolved ellipsis that make the code uncompilable, (c) syntax errors. Reject the post if any of these are present, and reference the exact offending API/line in 'feedback' and in a 'corrections' entry (with 'originalText' being the wrong code line/API name). If no [CODE SNIPPETS] section is provided (text-only draft), skip code validation — do NOT reject a post simply because it is text-only, unless the user prompt strictly demanded code examples.
 4. Ensure the final post text does not contain raw markdown code blocks (code should be represented as [IMAGE_CODE_X] if image code snippets were provided, or kept as plain text if no code snippets were generated).
 5. KNOWLEDGE CUTOFF CHECK: If the draft denies the existence of something the user explicitly asked about (e.g., "this version does not exist", "this feature was not announced"), this is a critical hallucination and MUST be rejected with a clear explanation in the feedback field. The specialist's training data may simply be outdated — refusal to engage with valid user topics is always wrong.
 6. [WEB_DATA] VALIDATION: If [WEB_DATA] is provided below, it contains live content fetched from the user's source URL. Use it as ground truth when fact-checking. A claim in the draft is VALID if it appears in [WEB_DATA], even if it contradicts your training. Do NOT reject a claim solely because it conflicts with your training data if [WEB_DATA] supports it.
@@ -47,6 +47,9 @@ Your job is to check that the draft accurately reflects what [WEB_DATA] says, no
 ---
 
 Review this draft:\n\n${state.technicalDraft}`;
+    if (state.codeSnippets && state.codeSnippets.length > 0) {
+      userPrompt += `\n\n[CODE SNIPPETS] (the actual raw code behind each [CODE_SNIPPET_N] placeholder above — this is what gets published, validate it for real, non-hallucinated APIs):\n\n${state.codeSnippets.join('\n\n---\n\n')}`;
+    }
     if (state.webData) {
       userPrompt += `\n\n[WEB_DATA] (live source fetched from the user's URL — use as ground truth for fact-checking):\n${state.webData.substring(0, 6_000)}`;
     }
