@@ -15,7 +15,9 @@ import { MAX_REVIEW_ATTEMPTS } from './edgeConditions.ts';
 const EMPTY_OR_PLACEHOLDER_ONLY_RE = /^\[CODE_SNIPPET_\d+\]:?\s*$/i;
 const PLACEHOLDER_PREFIX_RE = /^\[CODE_SNIPPET_\d+\]:?\s*/i;
 
-function findBrokenCodeSnippets(codeSnippets?: string[]): number[] {
+// Exported so src/scripts/run-eval.ts can reuse the exact same check as a
+// deterministic evaluator instead of duplicating the regex.
+export function findBrokenCodeSnippets(codeSnippets?: string[]): number[] {
   if (!codeSnippets || codeSnippets.length === 0) return [];
   const broken: number[] = [];
   codeSnippets.forEach((snippet, i) => {
