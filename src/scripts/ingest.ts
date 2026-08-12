@@ -77,13 +77,22 @@ const GITHUB_TREE_FILE_CAP = 40;
 const INDEX_CHILD_LINK_CAP = 40;
 
 // Gemini's free-tier embedding quota is easy to blow through when ingesting
-// many sources back-to-back. When that happens, LangChain's embeddings
-// wrapper can swallow the underlying 429 and hand Pinecone an empty vector,
-// which surfaces as a confusing "Vector dimension 0" error instead of a
-// clear rate-limit message. Retry with backoff, and pace requests out.
+// many sources back-to-back — specifically TPM (tokens/minute), not RPM.
+// When TPM is exhausted, LangChain's embeddings wrapper can swallow the
+// underlying 429 and hand Pinecone an empty vector, which surfaces as a
+// confusing "Vector dimension 0" error instead of a clear rate-limit
+// message. Since TPM is a rolling 60s window, a short backoff (a few
+// seconds) just re-fails immediately — the retry has to wait out most of
+// the window. Non-rate-limit errors (network blips, etc.) still use a
+// short backoff.
 const EMBED_RETRY_ATTEMPTS = 4;
-const EMBED_RETRY_BASE_MS = 4000; // 4s, 8s, 12s
-const INTER_SOURCE_DELAY_MS = 500;
+const SHORT_RETRY_BASE_MS = 4000; // 4s, 8s, 12s — transient/non-quota errors
+const RATE_LIMIT_WAIT_MS = 65_000; // covers a full TPM window with margin
+const INTER_SOURCE_DELAY_MS = 1500; // pace requests to avoid tripping TPM in the first place
+
+function isRateLimitError(message: string): boolean {
+  return /dimension 0|rate.?limit|quota|resource_exhausted|429/i.test(message);
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -274,8 +283,9 @@ async function addDocumentsWithRetry(
         console.error(`[Ingest] ❌ Failed to upsert "${source}" after ${attempt} attempt(s): ${message}`);
         return false;
       }
-      const delay = EMBED_RETRY_BASE_MS * attempt;
-      console.warn(`[Ingest] ⚠️  Upsert error for "${source}" (attempt ${attempt}/${EMBED_RETRY_ATTEMPTS}, likely embedding rate limit) — retrying in ${delay}ms: ${message}`);
+      const rateLimited = isRateLimitError(message);
+      const delay = rateLimited ? RATE_LIMIT_WAIT_MS : SHORT_RETRY_BASE_MS * attempt;
+      console.warn(`[Ingest] ⚠️  Upsert error for "${source}" (attempt ${attempt}/${EMBED_RETRY_ATTEMPTS}${rateLimited ? ', TPM rate limit' : ''}) — retrying in ${Math.round(delay / 1000)}s: ${message}`);
       await sleep(delay);
     }
   }
