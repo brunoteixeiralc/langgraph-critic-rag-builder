@@ -32,7 +32,14 @@ export function findBrokenCodeSnippets(codeSnippets?: string[]): number[] {
 
 export function createReviewerNode(llmClient: OpenRouterService) {
   return async (state: GraphState, runtime?: Runtime): Promise<Partial<GraphState>> => {
-    console.log(`[Reviewer] Auditing draft (Attempt ${state.reviewCount + 1}/${MAX_REVIEW_ATTEMPTS})...`);
+    // Defensive fallback: reviewCount should always be seeded to 0 by the
+    // state schema's default, but a corrupted execution context (e.g. two
+    // tracers fighting over the same AsyncLocalStorage run tree — see
+    // run-eval.ts for a real case of this) can occasionally hand us
+    // `undefined` here. Guard against `undefined + 1 = NaN` blowing up the
+    // graph's state validation.
+    const reviewCount = state.reviewCount ?? 0;
+    console.log(`[Reviewer] Auditing draft (Attempt ${reviewCount + 1}/${MAX_REVIEW_ATTEMPTS})...`);
 
     // Defensive short-circuit: routeAfterReview already stops the loop once
     // reviewCount hits MAX_REVIEW_ATTEMPTS and sends the state straight to
@@ -40,7 +47,7 @@ export function createReviewerNode(llmClient: OpenRouterService) {
     // This guard only matters if the node is invoked directly (e.g. graph
     // resumed from a checkpoint at the limit) — skip the LLM call and let
     // imageExtractorNode decide whether the draft is salvageable.
-    if (state.reviewCount >= MAX_REVIEW_ATTEMPTS) {
+    if (reviewCount >= MAX_REVIEW_ATTEMPTS) {
       return { reviewFeedback: '' };
     }
 
@@ -63,7 +70,7 @@ export function createReviewerNode(llmClient: OpenRouterService) {
         reviewerSearchQuery: '',
         approvedContent: state.technicalDraft || undefined,
         corrections,
-        reviewCount: state.reviewCount + 1,
+        reviewCount: reviewCount + 1,
       };
     }
 
@@ -109,7 +116,7 @@ Review this draft:\n\n${state.technicalDraft}`;
       return {
         reviewFeedback: "System error during review, retry.",
         reviewerSearchQuery: "",
-        reviewCount: state.reviewCount + 1,
+        reviewCount: reviewCount + 1,
       };
     }
 
@@ -121,7 +128,7 @@ Review this draft:\n\n${state.technicalDraft}`;
         reviewerSearchQuery: result.data.reviewerSearchQuery,
         approvedContent: result.data.approvedContent || undefined,
         corrections: result.data.corrections && result.data.corrections.length > 0 ? result.data.corrections : undefined,
-        reviewCount: state.reviewCount + 1,
+        reviewCount: reviewCount + 1,
       };
     }
 

@@ -128,6 +128,20 @@ function reviewAttempts({ outputs }: EvalArgs): EvaluationResult {
 }
 
 async function main() {
+  // `evaluate()` records inputs/outputs/scores to LangSmith on its own via
+  // an explicit client — it does NOT need the ambient LANGSMITH_TRACING env
+  // var. Leaving that global auto-tracer on WHILE evaluate() runs makes two
+  // independent tracers fight over the same AsyncLocalStorage-based run-tree
+  // context that LangGraph also uses internally for state propagation. That
+  // conflict is what caused "Error in handler LangChainTracer, handleChainEnd:
+  // No chain run to end" and, worse, corrupted reviewCount into NaN on every
+  // run (undefined + 1 = NaN) because the state channel's default value
+  // never got hydrated correctly under the corrupted context. Disabling the
+  // ambient tracer here avoids the collision; evaluate()'s own results still
+  // show up in LangSmith normally.
+  process.env.LANGSMITH_TRACING = 'false';
+  process.env.LANGCHAIN_TRACING_V2 = 'false';
+
   if (!process.env.LANGSMITH_API_KEY) {
     console.error('❌ LANGSMITH_API_KEY not set in .env. Aborting.');
     process.exit(1);
