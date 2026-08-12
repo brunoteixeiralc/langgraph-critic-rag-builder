@@ -88,6 +88,7 @@ The reviewer has identified SPECIFIC errors in the previous draft. Your task is 
 3. Reassemble the final complete draft by integrating the corrections into the approved content.
 4. Do NOT introduce any new claims, examples, or code snippets beyond what is in the approved content + corrections.
 5. [PREVIOUS CODE SNIPPETS] below is the actual Python/TypeScript code you wrote last attempt. If any correction or the general feedback references an API, method, or claim that appears INSIDE that code (e.g. a hallucinated function that doesn't exist), you MUST also fix the corresponding entry in your new 'codeSnippets' output to use the real API — do not just patch the prose while leaving the code itself wrong. If the code was not flagged, keep it unchanged.
+6. If a previous snippet below is EMPTY or is literally just the placeholder token itself (e.g. the string "[CODE_SNIPPET_1]"), that means you FAILED to write real code for it last attempt. This is NOT approved content to preserve — you MUST discard it and write brand-new, complete, compilable Python/TypeScript code for it. Never copy an empty or placeholder-only snippet forward into your new 'codeSnippets' output.
 
 [APPROVED CONTENT — COPY VERBATIM, NO CHANGES]:
 ${state.approvedContent || '(none — the reviewer did not identify any fully correct sections)'}

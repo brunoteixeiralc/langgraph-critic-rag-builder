@@ -46,11 +46,21 @@ export function createReviewerNode(llmClient: OpenRouterService) {
     if (brokenSnippets.length > 0) {
       console.warn(`[Reviewer] ⚠️  Deterministic check: codeSnippets [${brokenSnippets.join(', ')}] are empty or placeholder-only (specialist echoed the token instead of writing code). Forcing a corrective retry without an LLM call.`);
       const list = brokenSnippets.map((n) => `codeSnippets[${n - 1}]`).join(', ');
+      // Structured 'corrections' entries (not just prose in reviewFeedback) so
+      // this rides the same explicit "Fix #N" list the specialist already
+      // follows for factual corrections — weaker fallback models are more
+      // likely to act on a numbered instruction than on prose buried in
+      // general feedback.
+      const corrections = brokenSnippets.map((n) => ({
+        originalText: `[CODE_SNIPPET_${n}]`,
+        issue: `codeSnippets[${n - 1}] was left empty or as the literal placeholder token instead of real code — this is NOT something to preserve, it's a failure from last attempt.`,
+        suggestedReplacement: `(write complete, compilable code here — do not copy the placeholder token forward)`,
+      }));
       return {
         reviewFeedback: `Snippet(s) #${brokenSnippets.join(', #')} were left as empty placeholders instead of real code — you output the literal "[CODE_SNIPPET_N]" token (or nothing) as the codeSnippets entry instead of actual source. In your next 'codeSnippets' array, you MUST replace ${list} with complete, compilable code implementing what the draft describes for that snippet. Every codeSnippets entry must contain real code, never the placeholder token or an empty string.`,
         reviewerSearchQuery: '',
         approvedContent: state.technicalDraft || undefined,
-        corrections: undefined,
+        corrections,
         reviewCount: state.reviewCount + 1,
       };
     }
