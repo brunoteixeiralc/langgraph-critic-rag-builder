@@ -8,6 +8,7 @@
     "start": "npx tsx --env-file .env src/index.ts",
     "server": "tsx src/server.ts",
     "server:dev": "npx tsx --env-file .env src/server.ts",
+    "ingest": "npx tsx --env-file .env src/scripts/ingest.ts",
     "test": "node --env-file .env --test tests/**/*.test.ts",
     "test:watch": "node --env-file .env --test --watch tests/**/*.test.ts",
     "langgraph:serve": "npx @langchain/langgraph-cli dev"
