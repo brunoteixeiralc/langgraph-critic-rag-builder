@@ -12,7 +12,7 @@ export type LLMResponse = {
 const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 2000; // 2s, 4s, 8s (exponential backoff)
 
-function isRetryableError(error: unknown): boolean {
+export function isRetryableError(error: unknown): boolean {
   const err = error as { status?: number; lc_error_code?: string; message?: string } | undefined;
   if (!err) return false;
   if (err.status === 429 || err.status === 500 || err.status === 502 || err.status === 503) return true;

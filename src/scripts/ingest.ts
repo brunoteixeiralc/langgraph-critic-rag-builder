@@ -46,6 +46,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { createHash } from 'crypto';
+import { pathToFileURL } from 'url';
 import { Pinecone } from '@pinecone-database/pinecone';
 import { PineconeStore } from '@langchain/pinecone';
 import { GoogleGenerativeAIEmbeddings } from '@langchain/google-genai';
@@ -103,7 +104,7 @@ const SHORT_RETRY_BASE_MS = 4000; // 4s, 8s, 12s — transient/non-quota errors
 const RATE_LIMIT_WAIT_MS = 65_000; // covers a full TPM window with margin
 const INTER_SOURCE_DELAY_MS = 1500; // pace requests to avoid tripping TPM in the first place
 
-function isRateLimitError(message: string): boolean {
+export function isRateLimitError(message: string): boolean {
   return /dimension 0|rate.?limit|quota|resource_exhausted|429/i.test(message);
 }
 
@@ -113,7 +114,7 @@ function sleep(ms: number): Promise<void> {
 
 const GITHUB_TREE_RE = /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/tree\/([^/]+)\/(.+)$/;
 
-function chunkText(text: string, chunkSize: number, overlap: number): string[] {
+export function chunkText(text: string, chunkSize: number, overlap: number): string[] {
   const chunks: string[] = [];
   let start = 0;
   while (start < text.length) {
@@ -125,7 +126,7 @@ function chunkText(text: string, chunkSize: number, overlap: number): string[] {
   return chunks;
 }
 
-function chunkId(source: string, index: number): string {
+export function chunkId(source: string, index: number): string {
   return createHash('sha256').update(`${source}#${index}`).digest('hex').slice(0, 32);
 }
 
@@ -434,7 +435,13 @@ async function main() {
   console.log(`\n✅ Ingestion complete. ${totalSources} source(s) embedded, ${totalChunks} chunk(s) upserted, ${totalUnchanged} unchanged (skipped), ${totalSkipped} failed.`);
 }
 
-main().catch((err) => {
-  console.error('❌ Ingestion failed:', err);
-  process.exit(1);
-});
+// Only run when executed directly (`npm run ingest`), not when this module
+// is imported elsewhere — e.g. tests import chunkText/chunkId/isRateLimitError
+// as pure helpers and must not trigger a real ingestion run as a side effect.
+const isMainModule = Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1] as string).href;
+if (isMainModule) {
+  main().catch((err) => {
+    console.error('❌ Ingestion failed:', err);
+    process.exit(1);
+  });
+}

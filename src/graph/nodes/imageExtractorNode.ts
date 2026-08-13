@@ -19,7 +19,7 @@ function slugify(text: string): string {
     .replace(/-+/g, '-');
 }
 
-function getExtension(niche?: string, code?: string): string {
+export function getExtension(niche?: string, code?: string): string {
   if (niche === 'ios') return 'swift';
   if (niche === 'ai_engineering') {
     if (code && (code.includes('import ') || code.includes('def ') || code.includes('print(')) && !code.includes('console.log')) {
