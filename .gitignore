@@ -5,6 +5,9 @@ node_modules
 .env
 output
 
+# macOS Finder metadata — never useful in a repo
+.DS_Store
+
 # Stray downloaded snippet images (e.g. via curl -o at repo root while manually
 # checking /generate output) — the real ones live in output/, already ignored.
 /*.png
