@@ -37,7 +37,12 @@ jobs:
 
       - name: Run Socket Security scan
         env:
-          SOCKET_SECURITY_API_KEY: ${{ secrets.SOCKET_SECURITY_API_KEY }}
+          # socketsecurity CLI v2.6.4 reads SOCKET_SECURITY_API_TOKEN, not
+          # _API_KEY as Socket's own docs page currently shows — confirmed
+          # by the CLI's own error message on a real run. Repo secret stays
+          # named SOCKET_SECURITY_API_KEY (already created); only the env
+          # var name it's mapped to changes here.
+          SOCKET_SECURITY_API_TOKEN: ${{ secrets.SOCKET_SECURITY_API_KEY }}
         run: |
           socketcli \
             --target-path "$GITHUB_WORKSPACE" \
