@@ -1,0 +1,20 @@
+title = "gitleaks config for langgraph-critic-rag-builder"
+
+# Extend gitleaks' default, actively-maintained ruleset rather than
+# replacing it — we only add an allowlist entry on top, we don't want to
+# lose coverage for anything the default rules already catch.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known-safe files that intentionally hold blank/placeholder values"
+paths = [
+  # Template committed on purpose with every KEY= left empty. Gitleaks'
+  # generic-api-key rule scores entropy over the whole matched line
+  # (including the variable name itself), which can flag `SOME_KEY=` even
+  # with nothing after the `=` — confirmed via `git show` on the flagged
+  # historical commit that no real value was ever committed here. The real
+  # .env is gitignored and NOT covered by this allowlist, so an accidental
+  # `git add -f .env` would still be caught.
+  '''(^|/)\.env\.example$''',
+]

@@ -60,7 +60,7 @@ jobs:
           sudo mv gitleaks /usr/local/bin/gitleaks
 
       - name: Scan for committed secrets
-        run: gitleaks detect --source . --redact -v
+        run: gitleaks detect --source . --config .gitleaks.toml --redact -v
 
   release:
     name: Tag & publish GitHub Release
