@@ -34,12 +34,28 @@
  */
 import express from 'express';
 import type { NextFunction, Request, Response } from 'express';
-import { randomUUID } from 'crypto';
+import { randomUUID, timingSafeEqual } from 'crypto';
 import { rateLimit } from 'express-rate-limit';
+import helmet from 'helmet';
+import cors from 'cors';
 import { buildPostGraph } from './graph/graph.ts';
 import { OpenRouterService } from './services/openrouterService.ts';
 
 const app = express();
+
+// Sets a solid baseline of security headers (X-Content-Type-Options,
+// X-Frame-Options, Strict-Transport-Security, disables X-Powered-By, etc.).
+// This is a JSON/image API, not an HTML app, so the default CSP is harmless
+// noise rather than something that needs tuning.
+app.use(helmet());
+
+// This API is meant to be called server-to-server (curl, another backend) —
+// not from a browser page on a third-party origin. Explicit allowlist via
+// env var, defaulting to "no cross-origin access" rather than silently
+// leaving CORS unset (which is safe today, but invites someone to bolt on
+// `cors()` with a wildcard later without thinking about it).
+const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? '').split(',').map((o) => o.trim()).filter(Boolean);
+app.use(cors({ origin: allowedOrigins.length > 0 ? allowedOrigins : false }));
 
 // Railway (and most PaaS providers) sit in front of this app as a reverse
 // proxy. Without this, req.ip resolves to the proxy's address for every
@@ -59,10 +75,26 @@ if (!API_KEY) {
   console.warn(`⚠️  SERVER_API_KEY is only ${API_KEY.length} chars — recommend 32+ random bytes, e.g.: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`);
 }
 
+// Plain `!==` short-circuits on the first differing byte, so an attacker
+// measuring response times could in theory learn the key one byte at a time.
+// timingSafeEqual always compares the full buffer length. It throws if the
+// two buffers differ in length, so we still do a (safe, constant-shape)
+// comparison in that case rather than returning early — no early return
+// based on `.length` means no length-derived timing signal either.
+function safeCompare(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) {
+    timingSafeEqual(bufA, bufA); // burn the same amount of time as a real comparison
+    return false;
+  }
+  return timingSafeEqual(bufA, bufB);
+}
+
 function requireApiKey(req: Request, res: Response, next: NextFunction) {
   if (!API_KEY) return next(); // no key configured — warned above, allow through (e.g. local dev)
   const provided = req.header('x-api-key');
-  if (provided !== API_KEY) {
+  if (!provided || !safeCompare(provided, API_KEY)) {
     res.status(401).json({ error: 'Unauthorized. Missing or invalid x-api-key header.' });
     return;
   }
@@ -184,11 +216,22 @@ app.get('/health', (_req: Request, res: Response) => {
   res.status(200).json({ ok: true });
 });
 
+// A `topic` is meant to be a short prompt (optionally with a URL or two), not
+// a document. Without a cap, express.json's 1mb limit is the only ceiling —
+// a ~1MB topic gets stuffed into every specialist prompt (and re-sent on
+// every review iteration), which is slow and needlessly expensive in tokens.
+const MAX_TOPIC_LENGTH = 2_000;
+
 app.post('/generate', generateLimiter, requireApiKey, (req: Request, res: Response) => {
   const { topic } = req.body ?? {};
 
   if (typeof topic !== 'string' || !topic.trim()) {
     res.status(400).json({ error: 'Request body must include a non-empty "topic" string.' });
+    return;
+  }
+
+  if (topic.length > MAX_TOPIC_LENGTH) {
+    res.status(400).json({ error: `"topic" must be at most ${MAX_TOPIC_LENGTH} characters (got ${topic.length}).` });
     return;
   }
 
@@ -272,6 +315,55 @@ app.get('/result/:jobId/images/:filename', requireApiKey, (req: Request, res: Re
   res.status(200).set('Content-Type', 'image/png').send(image.buffer);
 });
 
-app.listen(PORT, '0.0.0.0', () => {
+// Catches: malformed JSON bodies (express.json() calls next(err)), and any
+// synchronous throw in a route handler above. Without this, Express's
+// default error handler answers with a generic Express-branded HTML page
+// (and a stack trace outside production) instead of a clean JSON error.
+// Must be registered LAST, and must take exactly 4 params for Express to
+// recognize it as an error handler.
+app.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
+  if (res.headersSent) return next(err);
+  const message = err instanceof Error ? err.message : String(err);
+  console.error('[Server] Unhandled error in request pipeline:', message);
+  res.status(400).json({ error: 'Bad request.' });
+});
+
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 LangGraph Critic-RAG server listening on 0.0.0.0:${PORT}`);
 });
+
+// The /generate handler's own async work is already wrapped in try/catch
+// (see above), so this is a safety net for anything outside that path —
+// without it, an unhandled rejection or uncaught exception crashes the
+// process with no log line explaining why, and Railway just sees the
+// service die and restart.
+process.on('unhandledRejection', (reason) => {
+  console.error('[Server] Unhandled promise rejection:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('[Server] Uncaught exception:', err);
+  // Node's own guidance: don't keep running after this — the process may be
+  // in a corrupted state. Exit and let Railway restart it cleanly.
+  process.exit(1);
+});
+
+// Railway sends SIGTERM before restarting/redeploying a service. Without
+// handling it, in-flight requests (a /generate call mid-poll, an image
+// download) get cut off mid-response instead of finishing gracefully.
+function shutdown(signal: string): void {
+  console.log(`[Server] ${signal} received — shutting down gracefully...`);
+  server.close(() => {
+    console.log('[Server] HTTP server closed.');
+    process.exit(0);
+  });
+  // Background /generate jobs can run for minutes; don't hang forever
+  // waiting for connections to drain if something never finishes.
+  setTimeout(() => {
+    console.warn('[Server] Graceful shutdown timed out — forcing exit.');
+    process.exit(1);
+  }, 10_000).unref();
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));

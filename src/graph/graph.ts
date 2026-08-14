@@ -17,7 +17,6 @@ export const PostStateAnnotation = z.object({
   reviewerSearchQuery: z.string().optional(),
   ragContext: z.string().optional(),
   webData: z.string().optional(),        // Live content fetched from URLs in the user command
-  mcpContext: z.string().optional(),
   technicalDraft: z.string().optional(),
   codeSnippets: z.array(z.string()).optional(),
   reviewFeedback: z.string().optional(),
