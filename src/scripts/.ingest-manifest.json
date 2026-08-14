@@ -83,5 +83,10 @@
     "contentHash": "e2c072d31d5d96db2a6c706c3576beb736dc6512fa84431eed936f98b5692c97",
     "chunkCount": 1,
     "ingestedAt": "2026-08-12T14:25:57.290Z"
+  },
+  "https://raw.githubusercontent.com/swiftlang/swift-evolution/main/proposals/0545-build-debugging-options.md": {
+    "contentHash": "4d40c584def0db5cd8045c6f036f88bf6122489d52882628cfdc8b00e5410fde",
+    "chunkCount": 3,
+    "ingestedAt": "2026-08-14T14:27:42.372Z"
   }
 }

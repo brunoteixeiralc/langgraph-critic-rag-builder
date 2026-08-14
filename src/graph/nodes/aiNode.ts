@@ -9,22 +9,43 @@ export function createAiNode(llmClient: OpenRouterService) {
   return async (state: GraphState, runtime?: Runtime): Promise<Partial<GraphState>> => {
     console.log("[AI Engineering Specialist] Collecting RAG and generating draft...");
 
-    let ragContext = await ragService.retrieveContext(state.initialCommand, "ai_engineering");
+    // RAG (initial + optional corrective query) and the web fetch are
+    // independent of each other — they don't need each other's results, so
+    // there's no reason to await them one at a time. Kick all three off
+    // together and let them run concurrently; this node re-runs on every
+    // rejected draft, so the saved latency compounds across review loops.
+    const ragPromise = ragService.retrieveContext(state.initialCommand, "ai_engineering");
 
-    if (state.reviewCount > 0 && state.reviewerSearchQuery) {
+    const needsCorrectiveRag = state.reviewCount > 0 && !!state.reviewerSearchQuery;
+    if (needsCorrectiveRag) {
       console.log(`[Iterative RAG] Searching Pinecone context for: "${state.reviewerSearchQuery}"...`);
-      const correctiveContext = await ragService.retrieveContext(state.reviewerSearchQuery, "ai_engineering");
-      if (correctiveContext) {
-        ragContext = `${ragContext}\n\n[RAG Data (Correction)]: \n${correctiveContext}`;
-      }
     }
+    const correctiveRagPromise = needsCorrectiveRag
+      ? ragService.retrieveContext(state.reviewerSearchQuery!, "ai_engineering")
+      : Promise.resolve<string | null>(null);
 
     // --- Live URL Content Extraction ---
     const urls = extractUrls(state.initialCommand);
-    let webData = '';
     if (urls.length > 0) {
       console.log(`[URL Extractor] Found ${urls.length} URL(s) in command. Fetching live content...`);
-      const fetchResults = await Promise.allSettled(urls.map(url => fetchUrlContent(url)));
+    }
+    const webFetchPromise = urls.length > 0
+      ? Promise.allSettled(urls.map(url => fetchUrlContent(url)))
+      : Promise.resolve<PromiseSettledResult<string | null>[]>([]);
+
+    const [initialRagContext, correctiveContext, fetchResults] = await Promise.all([
+      ragPromise,
+      correctiveRagPromise,
+      webFetchPromise,
+    ]);
+
+    let ragContext = initialRagContext;
+    if (correctiveContext) {
+      ragContext = `${ragContext}\n\n[RAG Data (Correction)]: \n${correctiveContext}`;
+    }
+
+    let webData = '';
+    if (urls.length > 0) {
       const fetchedContents: string[] = [];
 
       fetchResults.forEach((result, idx) => {

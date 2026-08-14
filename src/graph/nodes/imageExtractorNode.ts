@@ -100,61 +100,91 @@ Valid niche names: "ios", "node_react", "ai_engineering".`;
     // HTTP wrapper in src/server.ts) can still get the rendered images back.
     const codeImages: { index: number; filename: string; base64: string }[] = [];
 
+    // Carbonara is the only external fetch in the project that had no
+    // timeout (webContentService's fetchUrlContent uses 15s) — if the API
+    // ever hangs, this used to be able to pin a job "running" forever.
+    const CARBONARA_TIMEOUT_MS = 15_000;
+
+    // One snippet at a time was purely self-inflicted latency: each render
+    // is an independent HTTP call to Carbonara with no dependency on the
+    // others, so a post with 3 snippets paid 3x the round-trip for no
+    // reason. Render all of them concurrently instead.
+    async function renderSnippet(
+      index: number,
+      rawSnippet: string,
+    ): Promise<{ index: number; filename: string; base64: string } | null> {
+      // Remove prefixes like [CODE_SNIPPET_1] or [CODE_SNIPPET_1]: that the LLM may incorrectly prepend
+      let codeContent = rawSnippet.replace(/^\[CODE_SNIPPET_\d+\]:?\s*/i, '');
+      // Unescape literal \n sequences that appear when the model serializes code as a JSON string
+      codeContent = codeContent.replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\"/g, '"');
+      const ext = getExtension(state.niche, codeContent);
+
+      // Save the original source code as text
+      const codePath = path.join(outputDir, `snippet_${index + 1}.${ext}`);
+      await fs.writeFile(codePath, codeContent, 'utf-8');
+      console.log(`[+] Source code saved: ${codePath}`);
+
+      if (!codeContent.trim()) {
+        console.warn(`[-] Snippet ${index + 1} code content is empty (raw placeholder was passed). Skipping Carbonara image generation.`);
+        return null;
+      }
+
+      const payload = {
+        code: codeContent,
+        backgroundColor: "rgba(171, 184, 195, 1)",
+        theme: "dracula",
+        windowTheme: "mac",
+        dropShadow: true,
+        paddingVertical: "56px",
+        paddingHorizontal: "56px"
+      };
+
+      console.log(`[Carbonara API] Sending request for snippet ${index + 1} (${codeContent.length} chars). Preview: "${codeContent.substring(0, 60).replace(/\n/g, ' ')}..."`);
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), CARBONARA_TIMEOUT_MS);
+
+      try {
+        const response = await fetch('https://carbonara.solopov.dev/api/cook', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
+
+        if (response.ok) {
+          const buffer = await response.arrayBuffer();
+          const pngBuffer = Buffer.from(buffer);
+          const filename = `snippet_${index + 1}.png`;
+          const imgPath = path.join(outputDir, filename);
+          await fs.writeFile(imgPath, pngBuffer);
+          console.log(`[+] Code image saved: ${imgPath}`);
+          return { index: index + 1, filename, base64: pngBuffer.toString('base64') };
+        }
+
+        const responseBody = await response.text().catch(() => 'Unable to read response body');
+        console.warn(`[-] HTTP error from Carbonara API for snippet ${index + 1}: ${response.status} ${response.statusText}`);
+        console.warn(`[-] Carbonara API Error Response Body:\n${responseBody}`);
+        console.warn(`[-] Sent Payload:`, JSON.stringify(payload, null, 2));
+        return null;
+      } catch (e) {
+        const isTimeout = e instanceof Error && e.name === 'AbortError';
+        console.error(
+          `[-] ${isTimeout ? `Carbonara request for snippet ${index + 1} timed out after ${CARBONARA_TIMEOUT_MS / 1000}s` : `Network/Fetch error generating Carbonara image for snippet ${index + 1}`}:`,
+          isTimeout ? undefined : e,
+        );
+        return null;
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
+
     if (state.codeSnippets && state.codeSnippets.length > 0) {
-      for (let i = 0; i < state.codeSnippets.length; i++) {
-        let codeContent = state.codeSnippets[i];
-        // Remove prefixes like [CODE_SNIPPET_1] or [CODE_SNIPPET_1]: that the LLM may incorrectly prepend
-        codeContent = codeContent.replace(/^\[CODE_SNIPPET_\d+\]:?\s*/i, '');
-        // Unescape literal \n sequences that appear when the model serializes code as a JSON string
-        codeContent = codeContent.replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\"/g, '"');
-        const ext = getExtension(state.niche, codeContent);
-        
-        // Save the original source code as text
-        const codePath = path.join(outputDir, `snippet_${i + 1}.${ext}`);
-        await fs.writeFile(codePath, codeContent, 'utf-8');
-        console.log(`[+] Source code saved: ${codePath}`);
-
-        if (!codeContent.trim()) {
-          console.warn(`[-] Snippet ${i + 1} code content is empty (raw placeholder was passed). Skipping Carbonara image generation.`);
-          continue;
-        }
-
-        const payload = {
-          code: codeContent,
-          backgroundColor: "rgba(171, 184, 195, 1)",
-          theme: "dracula",
-          windowTheme: "mac",
-          dropShadow: true,
-          paddingVertical: "56px",
-          paddingHorizontal: "56px"
-        };
-
-        console.log(`[Carbonara API] Sending request for snippet ${i + 1} (${codeContent.length} chars). Preview: "${codeContent.substring(0, 60).replace(/\n/g, ' ')}..."`);
-
-        try {
-          const response = await fetch('https://carbonara.solopov.dev/api/cook', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-          });
-
-          if (response.ok) {
-            const buffer = await response.arrayBuffer();
-            const pngBuffer = Buffer.from(buffer);
-            const filename = `snippet_${i + 1}.png`;
-            const imgPath = path.join(outputDir, filename);
-            await fs.writeFile(imgPath, pngBuffer);
-            codeImages.push({ index: i + 1, filename, base64: pngBuffer.toString('base64') });
-            console.log(`[+] Code image saved: ${imgPath}`);
-          } else {
-            const responseBody = await response.text().catch(() => 'Unable to read response body');
-            console.warn(`[-] HTTP error from Carbonara API for snippet ${i + 1}: ${response.status} ${response.statusText}`);
-            console.warn(`[-] Carbonara API Error Response Body:\n${responseBody}`);
-            console.warn(`[-] Sent Payload:`, JSON.stringify(payload, null, 2));
-          }
-        } catch (e) {
-          console.error(`[-] Network/Fetch error generating Carbonara image for snippet ${i + 1}:`, e);
-        }
+      const rendered = await Promise.all(
+        state.codeSnippets.map((snippet, i) => renderSnippet(i, snippet)),
+      );
+      for (const img of rendered) {
+        if (img) codeImages.push(img);
       }
     }
     console.log("\n✅ Process finished! Check the /output directory.\n");

@@ -41,6 +41,38 @@ import cors from 'cors';
 import { buildPostGraph } from './graph/graph.ts';
 import { OpenRouterService } from './services/openrouterService.ts';
 
+// Built once at module scope, not per-request. Both are stateless across
+// invocations: OpenRouterService only holds a configured ChatOpenAI client
+// (no per-call mutable fields), and a compiled LangGraph StateGraph threads
+// all request-specific data through the object passed to .invoke() rather
+// than storing it on the graph instance — this is the same graph object
+// LangGraph Cloud itself would reuse across many concurrent runs. Building
+// both fresh on every /generate call was pure repeated setup cost (and,
+// for buildPostGraph, is a real teardown/build cycle of nodes and edges)
+// for zero benefit.
+const llmClient = new OpenRouterService();
+const graph = buildPostGraph(llmClient);
+
+// Safety net: every individual network call in the graph has its own timeout
+// (OpenRouter retries with backoff, webContentService's 15s fetch, Carbonara's
+// own timeout below) — but nothing previously bounded the run as a WHOLE. If
+// any single call ever hung past its own timeout logic (or a future node
+// forgets to add one), the job would sit in "running" forever with no way
+// for a polling client to know it's dead. This is a soft timeout: it makes
+// the job report an error after GRAPH_TIMEOUT_MS, but doesn't cancel
+// in-flight requests inside the graph (no AbortSignal threaded through
+// LangGraph nodes) — it just stops us from waiting on them forever.
+const GRAPH_TIMEOUT_MS = 10 * 60 * 1000; // 10 min — well above the typical 1-3 min run (review retries + image rendering)
+
+function invokeGraphWithTimeout(input: { initialCommand: string; reviewCount: number }) {
+  return Promise.race([
+    graph.invoke(input),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`Graph run exceeded ${GRAPH_TIMEOUT_MS / 1000}s timeout.`)), GRAPH_TIMEOUT_MS).unref(),
+    ),
+  ]);
+}
+
 const app = express();
 
 // Sets a solid baseline of security headers (X-Content-Type-Options,
@@ -252,9 +284,7 @@ app.post('/generate', generateLimiter, requireApiKey, (req: Request, res: Respon
     job.updatedAt = Date.now();
 
     try {
-      const llmClient = new OpenRouterService();
-      const graph = buildPostGraph(llmClient);
-      const result = await graph.invoke({ initialCommand: topic, reviewCount: 0 });
+      const result = await invokeGraphWithTimeout({ initialCommand: topic, reviewCount: 0 });
 
       const { json, images } = serializeGraphResult(jobId, result);
       job.status = 'done';
