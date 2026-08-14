@@ -38,4 +38,14 @@ test('isRetryableError', async (t) => {
   await t.test('mensagem genérica não é retryable', () => {
     assert.strictEqual(isRetryableError({ message: 'Invalid API key' }), false);
   });
+
+  await t.test('falha de schema do providerStrategy é retryable', () => {
+    assert.strictEqual(
+      isRetryableError({
+        message: "Failed to parse structured output for tool 'providerStrategy':\n  - Model output did not satisfy the provided response schema..",
+      }),
+      true,
+    );
+    assert.strictEqual(isRetryableError({ message: 'Model output did not satisfy the provided response schema' }), true);
+  });
 });

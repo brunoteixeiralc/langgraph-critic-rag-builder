@@ -18,6 +18,14 @@ export function isRetryableError(error: unknown): boolean {
   if (err.status === 429 || err.status === 500 || err.status === 502 || err.status === 503) return true;
   if (err.lc_error_code === 'MODEL_RATE_LIMIT') return true;
   const message = err.message ?? '';
+  // "Model output did not satisfy the provided response schema" — providerStrategy's
+  // structured-output parser throws this when the model's JSON doesn't match the Zod
+  // schema (missing/malformed fields). This is a model-quality hiccup, not a request
+  // problem: OpenRouter's fallback list (this.config.models) can route the retry to a
+  // different underlying model/provider, and even on the same model, generation is
+  // stochastic — a second attempt often just succeeds. Previously this fell through
+  // to "non-retryable" and killed the whole node on the first bad output.
+  if (/did not satisfy the provided response schema|failed to parse structured output/i.test(message)) return true;
   return /429|rate.?limit|timeout|ECONNRESET|ETIMEDOUT/i.test(message);
 }
 
@@ -87,7 +95,7 @@ export class OpenRouterService {
         }
 
         const delay = BASE_DELAY_MS * 2 ** (attempt - 1);
-        console.warn(`⚠️  LLM call failed (attempt ${attempt}/${MAX_RETRIES}, likely rate-limited): ${message}. Retrying in ${delay}ms...`);
+        console.warn(`⚠️  LLM call failed (attempt ${attempt}/${MAX_RETRIES}, retryable): ${message}. Retrying in ${delay}ms...`);
         await sleep(delay);
       }
     }
