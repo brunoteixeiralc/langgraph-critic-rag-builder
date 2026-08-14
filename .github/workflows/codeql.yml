@@ -37,6 +37,6 @@ jobs:
       # No build step needed — JS/TS is analyzed directly from source
       # (unlike compiled languages, which need an actual build to trace).
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@03e4368ac7daa2bd82b3e85262f3bf87ee112f57 # v3
+        uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3 # v3
         with:
           category: "/language:javascript-typescript"
