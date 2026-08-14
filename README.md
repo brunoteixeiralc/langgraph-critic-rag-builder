@@ -7,6 +7,14 @@
 [![OpenRouter](https://img.shields.io/badge/OpenRouter-Black?style=for-the-badge&logo=openrouter&logoColor=white)](https://openrouter.ai/)
 [![LangSmith](https://img.shields.io/badge/LangSmith-1C3C3C?style=for-the-badge&logo=langchain&logoColor=white)](https://smith.langchain.com/)
 
+**Security & CI:**
+[![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-2088FF?style=for-the-badge&logo=githubactions&logoColor=white)](.github/workflows/ci-release.yml)
+[![CodeQL](https://img.shields.io/badge/CodeQL-171515?style=for-the-badge&logo=github&logoColor=white)](.github/workflows/codeql.yml)
+[![Dependabot](https://img.shields.io/badge/Dependabot-025E8C?style=for-the-badge&logo=dependabot&logoColor=white)](.github/dependabot.yml)
+[![gitleaks](https://img.shields.io/badge/gitleaks-FBB03B?style=for-the-badge&logo=git&logoColor=white)](.gitleaks.toml)
+[![Socket Security](https://img.shields.io/badge/Socket_Security-A855F7?style=for-the-badge&logo=socketdotdev&logoColor=white)](.github/workflows/socket.yml)
+[![npm audit](https://img.shields.io/badge/npm_audit-CB3837?style=for-the-badge&logo=npm&logoColor=white)](.github/workflows/ci-release.yml)
+
 A multi-agent content pipeline built on **LangGraph**, **Pinecone RAG**, and **OpenRouter**, that generates factually-grounded technical LinkedIn posts. A niche-classifying Orchestrator routes each request to a domain specialist; a strict fact-checking Reviewer runs an iterative correction loop against the draft (including the raw code, not just the surrounding prose) before anything is considered final; and an Image Extractor renders code snippets as syntax-highlighted PNGs via the Carbonara API.
 
 The system never publishes anything on its own. It's **Human-in-the-Loop by design** — LinkedIn's API only allows creating posts as immediately `PUBLISHED`, with no draft state, so auto-posting isn't an option even if you wanted it. Every run produces a package (local files, or a JSON job + downloadable images over HTTP) that a human reviews and posts manually.
