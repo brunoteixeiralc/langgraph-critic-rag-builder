@@ -43,6 +43,10 @@ jobs:
           # named SOCKET_SECURITY_API_KEY (already created); only the env
           # var name it's mapped to changes here.
           SOCKET_SECURITY_API_TOKEN: ${{ secrets.SOCKET_SECURITY_API_KEY }}
+          # The CLI also needs a GitHub token to read repo metadata via the
+          # GitHub API, even without PR-comment posting. GITHUB_TOKEN is
+          # auto-provided by Actions on every run — no secret to create.
+          GH_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           socketcli \
             --target-path "$GITHUB_WORKSPACE" \
