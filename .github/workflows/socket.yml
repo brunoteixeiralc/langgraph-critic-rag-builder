@@ -1,0 +1,45 @@
+name: Socket Security
+
+# Supply-chain scanning, distinct from npm-audit in ci-release.yml: Socket
+# analyzes package *behavior* (install scripts, obfuscated code, typosquats,
+# sudden maintainer/ownership changes, malware signatures) instead of only
+# matching against already-disclosed CVEs. It catches the "compromised
+# package published directly to npm" class of attack before it ever becomes
+# a CVE.
+#
+# REQUIRES SETUP (one-time, can't be automated from here):
+#   1. Sign up at https://socket.dev (free for public repos).
+#   2. Create an API key for CI/CD: https://docs.socket.dev/docs/create-socket-api-key-for-cicd
+#   3. Add it as a repo secret named SOCKET_SECURITY_API_KEY:
+#      Settings -> Secrets and variables -> Actions -> New repository secret.
+# Without that secret, this workflow will run but fail at the scan step.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  socket-security:
+    name: Socket dependency scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.12'
+
+      - name: Install Socket CLI
+        run: pip install socketsecurity --upgrade
+
+      - name: Run Socket Security scan
+        env:
+          SOCKET_SECURITY_API_KEY: ${{ secrets.SOCKET_SECURITY_API_KEY }}
+        run: |
+          socketcli \
+            --target-path "$GITHUB_WORKSPACE" \
+            --scm github \
+            --pr-number 0

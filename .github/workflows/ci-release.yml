@@ -39,6 +39,27 @@ jobs:
       - name: Unit tests (free — no API keys, no network)
         run: npm run test:unit
 
+  npm-audit:
+    name: Dependency audit (npm audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '>=24.10.0'
+          cache: 'npm'
+
+      - run: npm ci
+
+      # Cross-checks installed dependencies against the npm/GitHub Advisory
+      # Database for already-disclosed CVEs. audit-level=high so low/moderate
+      # findings (often in dev-only tooling, frequently without a fix
+      # available yet) don't block every release — high/critical is the bar
+      # worth failing CI over.
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+
   gitleaks:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
@@ -64,7 +85,7 @@ jobs:
 
   release:
     name: Tag & publish GitHub Release
-    needs: [test, gitleaks]
+    needs: [test, npm-audit, gitleaks]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
