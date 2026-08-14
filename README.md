@@ -6,8 +6,6 @@
 [![Gemini](https://img.shields.io/badge/Google_Gemini-8E75C2?style=for-the-badge&logo=googlegemini&logoColor=white)](https://deepmind.google/technologies/gemini/)
 [![OpenRouter](https://img.shields.io/badge/OpenRouter-Black?style=for-the-badge&logo=openrouter&logoColor=white)](https://openrouter.ai/)
 [![LangSmith](https://img.shields.io/badge/LangSmith-1C3C3C?style=for-the-badge&logo=langchain&logoColor=white)](https://smith.langchain.com/)
-
-**Security & CI:**
 [![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-2088FF?style=for-the-badge&logo=githubactions&logoColor=white)](.github/workflows/ci-release.yml)
 [![CodeQL](https://img.shields.io/badge/CodeQL-171515?style=for-the-badge&logo=github&logoColor=white)](.github/workflows/codeql.yml)
 [![Dependabot](https://img.shields.io/badge/Dependabot-025E8C?style=for-the-badge&logo=dependabot&logoColor=white)](.github/dependabot.yml)
