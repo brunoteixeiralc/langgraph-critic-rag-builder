@@ -1,0 +1,33 @@
+version: 2
+updates:
+  # npm dependencies. Patch/minor bumps are low-risk and get grouped into a
+  # single PR to keep the noise down. Major bumps are left ungrouped and
+  # opened individually — they're the ones actually worth reviewing one at a
+  # time (e.g. the Pinecone SDK v2 -> v5 jump done manually in this repo
+  # needed real verification, not a rubber-stamp merge).
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+
+  # GitHub Actions are pinned by commit SHA (see ci-release.yml / codeql.yml)
+  # specifically so Dependabot — not a movable tag — is what proposes
+  # updates: it resolves the new tag's SHA and opens a PR bumping both the
+  # SHA and the trailing "# vX" comment, so every version bump is reviewable
+  # instead of silently following whatever a tag points to today.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "ci"
+      include: "scope"
