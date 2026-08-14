@@ -12,7 +12,7 @@
     "eval:setup": "npx tsx --env-file .env src/scripts/create-eval-dataset.ts",
     "eval": "npx tsx --env-file .env src/scripts/run-eval.ts",
     "test": "node --env-file .env --test tests/**/*.test.ts",
-    "test:unit": "node --test tests/edgeConditions.test.ts tests/reviewerGuards.unit.test.ts tests/openrouterRetry.unit.test.ts tests/imageExtractor.unit.test.ts tests/ingestHelpers.unit.test.ts tests/webContentService.unit.test.ts",
+    "test:unit": "node --test tests/edgeConditions.test.ts tests/reviewerGuards.unit.test.ts tests/openrouterRetry.unit.test.ts tests/imageExtractor.unit.test.ts tests/ingestHelpers.unit.test.ts tests/webContentService.unit.test.ts tests/urlSafety.unit.test.ts",
     "test:integration": "node --env-file .env --test tests/orchestrator.test.ts",
     "test:watch": "node --env-file .env --test --watch tests/**/*.test.ts",
     "langgraph:serve": "npx @langchain/langgraph-cli dev"
@@ -45,6 +45,8 @@
     "@openrouter/sdk": "^0.8.0",
     "@pinecone-database/pinecone": "^2.2.2",
     "express": "^5.1.0",
+    "express-rate-limit": "^8.6.2",
+    "ipaddr.js": "^2.5.0",
     "langchain": "^1.2.21",
     "langsmith": "^0.8.7",
     "zod": "^3.23.8"

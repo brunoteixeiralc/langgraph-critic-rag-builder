@@ -35,10 +35,19 @@
 import express from 'express';
 import type { NextFunction, Request, Response } from 'express';
 import { randomUUID } from 'crypto';
+import { rateLimit } from 'express-rate-limit';
 import { buildPostGraph } from './graph/graph.ts';
 import { OpenRouterService } from './services/openrouterService.ts';
 
 const app = express();
+
+// Railway (and most PaaS providers) sit in front of this app as a reverse
+// proxy. Without this, req.ip resolves to the proxy's address for every
+// request — rate limiting below would either lump all callers together or
+// express-rate-limit would refuse to start (it validates X-Forwarded-For
+// usage once trust proxy is misconfigured). Trust exactly one hop.
+app.set('trust proxy', 1);
+
 app.use(express.json({ limit: '1mb' }));
 
 const PORT = Number(process.env.PORT) || 8080;
@@ -46,6 +55,8 @@ const API_KEY = process.env.SERVER_API_KEY;
 
 if (!API_KEY) {
   console.warn('⚠️  SERVER_API_KEY is not set — endpoints are UNPROTECTED. Set SERVER_API_KEY before deploying publicly.');
+} else if (API_KEY.length < 32) {
+  console.warn(`⚠️  SERVER_API_KEY is only ${API_KEY.length} chars — recommend 32+ random bytes, e.g.: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`);
 }
 
 function requireApiKey(req: Request, res: Response, next: NextFunction) {
@@ -58,11 +69,37 @@ function requireApiKey(req: Request, res: Response, next: NextFunction) {
   next();
 }
 
+// --- Rate limiting -----------------------------------------------------
+// POST /generate is the "denial of wallet" surface: each call triggers
+// several paid OpenRouter calls plus Gemini embeddings, so it gets a tight
+// per-IP cap. Applied BEFORE requireApiKey so it also throttles someone
+// hammering the endpoint without a valid key, not just legitimate callers.
+const generateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10, // 10 generations / 15min / IP — generous for manual/personal use, caps a runaway script or a leaked key
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { error: 'Too many /generate requests. Please wait before trying again.' },
+});
+
+// Looser global cap — GET /result/:jobId is meant to be polled every few
+// seconds while a job runs, so this just guards against abuse, not normal use.
+const pollLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 120,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+});
+app.use(pollLimiter);
+
 // --- In-memory job store ---------------------------------------------------
 
 type JobStatus = 'pending' | 'running' | 'done' | 'error';
 
-type StoredImage = { filename: string; base64: string };
+// Images are kept as raw Buffers, not base64 strings. Base64 inflates size by
+// ~33% for no benefit here — the only consumer is the /images/:filename route,
+// which writes bytes straight to the response either way.
+type StoredImage = { filename: string; buffer: Buffer };
 
 type Job = {
   status: JobStatus;
@@ -84,6 +121,30 @@ setInterval(() => {
   }
 }, 15 * 60 * 1000).unref(); // sweep every 15min; unref so it doesn't keep the process alive on its own
 
+// The TTL sweep above only runs every 15min — a burst of /generate calls
+// within that window could otherwise grow the map unboundedly (each job
+// holds a full result payload plus PNG buffers). Cap the count too, evicting
+// the oldest job to make room, same idea as an LRU with insertion order.
+const MAX_JOBS = 200;
+
+function evictOldestJobIfAtCapacity(): void {
+  if (jobs.size < MAX_JOBS) return;
+
+  let oldestId: string | undefined;
+  let oldestCreatedAt = Infinity;
+  for (const [id, job] of jobs) {
+    if (job.createdAt < oldestCreatedAt) {
+      oldestCreatedAt = job.createdAt;
+      oldestId = id;
+    }
+  }
+
+  if (oldestId) {
+    jobs.delete(oldestId);
+    console.warn(`[Server] Job store at capacity (${MAX_JOBS}) — evicted oldest job ${oldestId}.`);
+  }
+}
+
 function serializeGraphResult(
   jobId: string,
   result: Awaited<ReturnType<ReturnType<typeof buildPostGraph>['invoke']>>,
@@ -91,7 +152,7 @@ function serializeGraphResult(
   const approved = Boolean(result.finalPostText);
   const images: StoredImage[] = (result.codeImages ?? []).map((img) => ({
     filename: img.filename,
-    base64: img.base64,
+    buffer: Buffer.from(img.base64, 'base64'), // decode once here, not on every image request
   }));
 
   const json = {
@@ -123,13 +184,15 @@ app.get('/health', (_req: Request, res: Response) => {
   res.status(200).json({ ok: true });
 });
 
-app.post('/generate', requireApiKey, (req: Request, res: Response) => {
+app.post('/generate', generateLimiter, requireApiKey, (req: Request, res: Response) => {
   const { topic } = req.body ?? {};
 
   if (typeof topic !== 'string' || !topic.trim()) {
     res.status(400).json({ error: 'Request body must include a non-empty "topic" string.' });
     return;
   }
+
+  evictOldestJobIfAtCapacity();
 
   const jobId = randomUUID();
   const now = Date.now();
@@ -206,7 +269,7 @@ app.get('/result/:jobId/images/:filename', requireApiKey, (req: Request, res: Re
     return;
   }
 
-  res.status(200).set('Content-Type', 'image/png').send(Buffer.from(image.base64, 'base64'));
+  res.status(200).set('Content-Type', 'image/png').send(image.buffer);
 });
 
 app.listen(PORT, '0.0.0.0', () => {
