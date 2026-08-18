@@ -23,14 +23,37 @@ const BASE_DELAY_MS = 2000; // 2s, 4s, 8s (exponential backoff)
 // budget.
 //
 // Started at 90s; bumped to 150s after a real run on a heavy Reviewer call
-// (6 code snippets + reproducing the entire post in one structured-output
-// field) hit the 90s ceiling twice in a row before a 3rd attempt finally
-// came back in ~20s — that's the model genuinely being slow on a big
-// payload, not hanging, and it burned a whole review attempt (out of only
+// hit the 90s ceiling twice in a row before a 3rd attempt finally came back
+// in ~20s — that's the model genuinely being slow on a big payload, not
+// hanging, and it burned a whole review attempt (out of only
 // MAX_REVIEW_ATTEMPTS=3) on pure infrastructure retries before any actual
 // content review happened. The graph as a whole can still take several
 // minutes across review loops regardless of this per-call bound.
+//
+// IMPORTANT: this used to be passed as `{ timeout: LLM_CALL_TIMEOUT_MS }` in
+// agent.invoke()'s RunnableConfig, trusting LangChain to convert it into an
+// AbortSignal and honor it. A real LangSmith trace proved that doesn't
+// actually bound the call: with timeoutMs=150000 correctly recorded in the
+// run's own metadata, two separate Reviewer calls both still ran for
+// 456.01s — the signal isn't propagated down to the actual underlying model
+// call through createAgent/LangGraph's internals (or isn't checked by
+// whatever retry logic is in the OpenAI SDK/langchain-openai layer beneath
+// it). raceWithTimeout() below is the same explicit Promise.race pattern
+// already proven to work for the whole-graph timeout in server.ts — it
+// doesn't depend on any internal plumbing honoring anything, it just stops
+// waiting at the deadline. Same caveat as that one: the underlying call
+// isn't cancelled, just abandoned, so it can keep running in the background
+// after this rejects.
 const LLM_CALL_TIMEOUT_MS = 150_000;
+
+function raceWithTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error(`LLM call exceeded ${ms / 1000}s timeout.`)), ms).unref();
+    }),
+  ]);
+}
 
 export function isRetryableError(error: unknown): boolean {
   const err = error as { status?: number; lc_error_code?: string; message?: string; name?: string } | undefined;
@@ -70,14 +93,19 @@ export class OpenRouterService {
       apiKey: this.config.apiKey,
       modelName: this.config.models[0],
       temperature: this.config.temperature,
-      // No explicit cap previously — fell back to whatever default the
+      // No explicit cap originally — fell back to whatever default the
       // provider/model applies, which truncated the Reviewer's postText
-      // mid-sentence on a real run (long technicalDraft, reviewer has to
-      // reproduce the entire post in one structured-output field). 4096 is
-      // generous enough for a full LinkedIn post + hashtags + the schema's
-      // other fields (feedback/corrections, empty when approved) with room
-      // to spare.
-      maxTokens: 4096,
+      // mid-sentence on a real run. Set to 4096 first, but that ALSO
+      // truncated on a later run — deepseek-v4-flash-0731 supports
+      // "reasoning"/"reasoning_effort" (it's a reasoning model), and hidden
+      // reasoning tokens count against the same maxTokens budget as the
+      // final answer. The OpenAI SDK's own parser throws "Could not parse
+      // response content as the length limit was reached" when that budget
+      // runs out before a complete JSON response is written — confirmed via
+      // a real stack trace. The model's actual max_completion_tokens ceiling
+      // is 393,216 (verified against OpenRouter's models API), so there's
+      // enormous headroom to raise this without approaching a real limit.
+      maxTokens: 24_576,
       configuration: {
         baseURL: 'https://openrouter.ai/api/v1',
         defaultHeaders: {
@@ -113,7 +141,7 @@ export class OpenRouterService {
 
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
-        const data = await agent.invoke({ messages }, { timeout: LLM_CALL_TIMEOUT_MS });
+        const data = await raceWithTimeout(agent.invoke({ messages }), LLM_CALL_TIMEOUT_MS);
         return {
           success: true,
           data: data.structuredResponse as T,
