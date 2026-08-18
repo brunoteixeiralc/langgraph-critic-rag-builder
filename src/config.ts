@@ -22,16 +22,26 @@ export const config: ModelConfig = {
   apiKey: process.env.OPENROUTER_API_KEY!,
   httpReferer: process.env.OPENROUTER_HTTP_REFERER || '',
   xTitle: process.env.OPENROUTER_X_TITLE || 'IA Devs - Prompt Chaining Article Generator',
+  // 2026-08-18: found via a direct query of https://openrouter.ai/api/v1/models
+  // that the old primary ('qwen/qwen3-coder-next') and one of the two free
+  // fallbacks ('liquid/lfm-2.5-2.6b:free') had both been removed from
+  // OpenRouter's catalog entirely — not rate-limited, just gone. That meant
+  // effectively every single generation had silently been running on the
+  // one fallback that still existed, 'nvidia/nemotron-3.5-lightning:free',
+  // which explains the real incidents this traced back to (an 8+ minute
+  // hang on one call, a truncated/garbled final post: a free, shared-quota
+  // model is exactly what produces that). Replaced with two paid-but-cheap
+  // models, verified directly against the live models list (not memory):
+  // both confirmed to support response_format/structured_outputs/tools in
+  // their supported_parameters, which providerStrategy() depends on.
   models: [
-    'qwen/qwen3-coder-next', // primary
-    // Fallbacks — OpenRouter tries these in order if the primary is
-    // rate-limited/unavailable (this is on top of the retry-with-backoff in
-    // openrouterService.ts, which retries the primary a few times first).
-    'nvidia/nemotron-3.5-lightning:free', // 30B MoE (3B active), 1M context, built for agentic/structured workloads
-    'liquid/lfm-2.5-2.6b:free', // small (2.6B), last resort — Liquid AI advises against heavy coding tasks with it
-    // https://openrouter.ai/models?fmt=cards&max_price=0&order=throughput-high-to-low&supported_parameters=structured_outputs%2Cresponse_format
-    // 'upstage/solar-pro-3:free',
-    // 'gpt-oss-120b:free',
+    // $0.14 / $0.28 per M tokens (in/out), 1.3M context. Description:
+    // "suited for coding, reasoning, and agent workflows" — good primary.
+    'deepseek/deepseek-v4-flash-0731',
+    // ~$0.10 / $0.60 per M tokens, 1.05M context. Different provider/lab
+    // entirely (OpenAI vs DeepSeek) — real failover diversity if the
+    // primary's provider has an outage, not just a cheaper copy of it.
+    'openai/gpt-5.6-luna',
   ],
   provider: {
     sort: {
