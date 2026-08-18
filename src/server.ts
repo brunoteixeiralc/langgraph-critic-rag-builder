@@ -40,6 +40,7 @@ import helmet from 'helmet';
 import cors from 'cors';
 import { buildPostGraph } from './graph/graph.ts';
 import { OpenRouterService } from './services/openrouterService.ts';
+import { renderPreviewPage } from './services/previewPage.ts';
 
 // Built once at module scope, not per-request. Both are stateless across
 // invocations: OpenRouterService only holds a configured ChatOpenAI client
@@ -301,7 +302,7 @@ app.post('/generate', generateLimiter, requireApiKey, (req: Request, res: Respon
     }
   })();
 
-  res.status(202).json({ jobId, statusUrl: `/result/${jobId}` });
+  res.status(202).json({ jobId, statusUrl: `/result/${jobId}`, previewUrl: `/result/${jobId}/preview` });
 });
 
 app.get('/result/:jobId', requireApiKey, (req: Request, res: Response) => {
@@ -324,6 +325,31 @@ app.get('/result/:jobId', requireApiKey, (req: Request, res: Response) => {
   }
 
   res.status(200).json({ status: 'done', topic: job.topic, ...job.result });
+});
+
+// Visual preview of a finished (or in-progress) post, rendered with PixiJS —
+// see src/services/previewPage.ts for the full design rationale. Not behind
+// requireApiKey: the HTML itself is static and holds no job data (a browser
+// navigating here can't attach an x-api-key header anyway); the page's own
+// JS prompts for the key and uses it for authenticated fetch() calls to
+// /result/:jobId and the image routes below, which stay fully protected.
+app.get('/result/:jobId/preview', (req: Request, res: Response) => {
+  const jobId = String(req.params.jobId);
+
+  if (!jobs.has(jobId)) {
+    res.status(404).send('Unknown or expired jobId.');
+    return;
+  }
+
+  // helmet's default CSP only allows same-origin scripts — this page needs
+  // PixiJS from a CDN plus its own inline <script>, so it gets a scoped
+  // override instead of loosening CSP for every route.
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; " +
+    "style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; connect-src 'self';",
+  );
+  res.status(200).set('Content-Type', 'text/html; charset=utf-8').send(renderPreviewPage(jobId));
 });
 
 app.get('/result/:jobId/images/:filename', requireApiKey, (req: Request, res: Response) => {
