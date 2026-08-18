@@ -45,7 +45,13 @@ export const config: ModelConfig = {
   ],
   provider: {
     sort: {
-      by: 'throughput', // Route to model with highest throughput (fastest response)
+      // 'throughput' optimizes tokens/sec once generation has started, which
+      // matters for long streamed completions. Our calls are bounded-size
+      // JSON (a LinkedIn post, not an essay), so overall responsiveness —
+      // dispatch + time-to-first-token + total completion time — matters
+      // more than raw tokens/sec. OpenRouter's own routing docs recommend
+      // 'latency' for exactly this case.
+      by: 'latency',
       partition: 'none',
     },
   },

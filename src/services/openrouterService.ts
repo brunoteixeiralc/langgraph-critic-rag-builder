@@ -117,6 +117,17 @@ export class OpenRouterService {
       modelKwargs: {
         models: this.config.models,
         provider: this.config.provider,
+        // OpenRouter's unified reasoning parameter — deepseek-v4-flash-0731
+        // (and gpt-5.6-luna) both advertise "reasoning"/"reasoning_effort"
+        // in their supported_parameters, meaning they can silently spend a
+        // chunk of the token budget "thinking" before writing the actual
+        // structured JSON answer. None of this app's tasks (classify a
+        // niche, fact-check a draft against fixed rules, write technical
+        // prose from provided sources) need deep multi-step reasoning —
+        // 'low' trims that hidden latency/token cost while keeping some
+        // headroom, rather than 'none', which removes it entirely and risks
+        // hurting the Reviewer's actual fact-checking judgment.
+        reasoning: { effort: 'low' },
       },
     });
   }

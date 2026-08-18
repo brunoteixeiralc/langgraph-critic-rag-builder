@@ -23,7 +23,16 @@ export const ReviewerOutputSchema = z.object({
   approvedContent: z.string().describe("If isApproved is false, copy VERBATIM the sections of the draft that are correct and should be preserved. Separate sections with a blank line. Set to empty string if the entire draft needs rewriting."),
   corrections: z.array(CorrectionItemSchema).describe("If isApproved is false, a structured list of specific corrections. Each item identifies the exact wrong text and its replacement. Set to empty array if the entire draft is approved or fully invalid."),
   reviewerSearchQuery: z.string().describe("If isApproved is false, generate a targeted 1-sentence search query to find correct technical facts in the database (Pinecone) related to the issues. If true, set to an empty string."),
-  postText: z.string().describe("If isApproved is true, provide the final optimized post text in US English. If false, set to an empty string."),
+  // No 'postText' field: the Reviewer validates, it doesn't rewrite. The
+  // specialist already writes the draft in final LinkedIn-post format (see
+  // the "LINKEDIN FORMATTING" rules in aiNode/flutterNode/nodeJsReactNode's
+  // system prompts), so on approval the final text is built deterministically
+  // in reviewerNode.ts via a plain [CODE_SNIPPET_N] -> [IMAGE_CODE_N] regex
+  // substitution — no LLM reproduction of the whole post needed. This used
+  // to be a 'postText' field the model had to fill with the entire
+  // reformatted post on every approval, which was expensive (large output)
+  // and fragile (a real run truncated mid-generation and broke JSON
+  // parsing).
   hashtags: z.array(z.string()).describe("If isApproved is true, provide 3 to 5 highly relevant hashtags. If false, set to an empty array."),
 });
 
