@@ -165,7 +165,14 @@ export function renderPreviewPage(jobId: string): string {
       .then(function (res) {
         if (res.status === 401) throw new Error('Chave invalida (401).');
         if (res.status === 404) throw new Error('Job nao encontrado ou expirado (404).');
-        if (!res.ok) throw new Error('Erro HTTP ' + res.status);
+        // 500 is how the server reports a *job* that failed (bad topic,
+        // graph timeout, LLM error, etc) — it still returns a real JSON
+        // body ({status:'error', error: '...'}), not just an HTTP failure.
+        // Previously this branch threw a generic "Erro HTTP 500" before
+        // ever reading that body, hiding the actual failure reason from the
+        // user. Any other unexpected non-2xx status still gets the generic
+        // message.
+        if (!res.ok && res.status !== 500) throw new Error('Erro HTTP ' + res.status);
         return res.json();
       })
       .then(function (data) { handleResult(data, key); })

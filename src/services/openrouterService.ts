@@ -12,11 +12,29 @@ export type LLMResponse = {
 const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 2000; // 2s, 4s, 8s (exponential backoff)
 
+// A real production run showed a single LLM call (no rate-limit, no error —
+// just silence) hang for 8+ minutes, blowing straight through the coarse
+// 600s whole-graph timeout in server.ts. That outer timeout doesn't cancel
+// the underlying call either, so it kept running as an orphaned "zombie"
+// after the job had already been marked failed and returned to the user —
+// which is why LangSmith showed a trace still executing well after the
+// preview page got its error. Bounding each individual call means a stall
+// fails fast and retries (below) instead of silently eating the whole
+// budget. 90s is generous for a single structured-output call; the graph as
+// a whole can still take several minutes across review loops.
+const LLM_CALL_TIMEOUT_MS = 90_000;
+
 export function isRetryableError(error: unknown): boolean {
-  const err = error as { status?: number; lc_error_code?: string; message?: string } | undefined;
+  const err = error as { status?: number; lc_error_code?: string; message?: string; name?: string } | undefined;
   if (!err) return false;
   if (err.status === 429 || err.status === 500 || err.status === 502 || err.status === 503) return true;
   if (err.lc_error_code === 'MODEL_RATE_LIMIT') return true;
+  // The timeout below aborts via AbortSignal.timeout(), which surfaces as an
+  // AbortError/TimeoutError by name — the message text isn't guaranteed to
+  // contain the word "timeout" (depends on how the underlying fetch/SDK
+  // wraps it), so check the name explicitly rather than relying on the
+  // message regex below to catch it.
+  if (err.name === 'AbortError' || err.name === 'TimeoutError') return true;
   const message = err.message ?? '';
   // "Model output did not satisfy the provided response schema" — providerStrategy's
   // structured-output parser throws this when the model's JSON doesn't match the Zod
@@ -87,7 +105,7 @@ export class OpenRouterService {
 
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
-        const data = await agent.invoke({ messages });
+        const data = await agent.invoke({ messages }, { timeout: LLM_CALL_TIMEOUT_MS });
         return {
           success: true,
           data: data.structuredResponse as T,
