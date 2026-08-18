@@ -44,6 +44,14 @@ export class OpenRouterService {
       apiKey: this.config.apiKey,
       modelName: this.config.models[0],
       temperature: this.config.temperature,
+      // No explicit cap previously — fell back to whatever default the
+      // provider/model applies, which truncated the Reviewer's postText
+      // mid-sentence on a real run (long technicalDraft, reviewer has to
+      // reproduce the entire post in one structured-output field). 4096 is
+      // generous enough for a full LinkedIn post + hashtags + the schema's
+      // other fields (feedback/corrections, empty when approved) with room
+      // to spare.
+      maxTokens: 4096,
       configuration: {
         baseURL: 'https://openrouter.ai/api/v1',
         defaultHeaders: {

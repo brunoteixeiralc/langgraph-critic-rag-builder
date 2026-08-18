@@ -15,6 +15,35 @@ import { MAX_REVIEW_ATTEMPTS } from './edgeConditions.ts';
 const EMPTY_OR_PLACEHOLDER_ONLY_RE = /^\[CODE_SNIPPET_\d+\]:?\s*$/i;
 const PLACEHOLDER_PREFIX_RE = /^\[CODE_SNIPPET_\d+\]:?\s*/i;
 
+// On approval the Reviewer has to reproduce the ENTIRE final post inside one
+// structured-output field (postText) — for a long technicalDraft this is a
+// lot of output tokens, and a real run showed the model can quietly cut it
+// short mid-sentence (still valid JSON, just incomplete content) instead of
+// failing outright. Two deterministic checks catch that before it ships:
+// the post is suspiciously short, or it's missing [IMAGE_CODE_N]
+// placeholders for code that was actually generated.
+const MIN_APPROVED_POST_LENGTH = 100;
+const IMAGE_PLACEHOLDER_RE = /\[IMAGE_CODE_(\d+)\]/g;
+
+// Exported for tests. Returns the 1-indexed snippet numbers that have code
+// in state.codeSnippets but no matching [IMAGE_CODE_N] placeholder in the
+// approved postText — or null if the post looks fine.
+export function findTruncatedApproval(postText: string, codeSnippetCount: number): number[] | 'too_short' | null {
+  if (postText.trim().length < MIN_APPROVED_POST_LENGTH) return 'too_short';
+  if (codeSnippetCount === 0) return null;
+  const found = new Set<number>();
+  let match: RegExpExecArray | null;
+  IMAGE_PLACEHOLDER_RE.lastIndex = 0;
+  while ((match = IMAGE_PLACEHOLDER_RE.exec(postText)) !== null) {
+    found.add(Number(match[1]));
+  }
+  const missing: number[] = [];
+  for (let i = 1; i <= codeSnippetCount; i++) {
+    if (!found.has(i)) missing.push(i);
+  }
+  return missing.length > 0 ? missing : null;
+}
+
 // Exported so src/scripts/run-eval.ts can reuse the exact same check as a
 // deterministic evaluator instead of duplicating the regex.
 export function findBrokenCodeSnippets(codeSnippets?: string[]): number[] {
@@ -129,6 +158,20 @@ Review this draft:\n\n${state.technicalDraft}`;
         reviewerSearchQuery: result.data.reviewerSearchQuery,
         approvedContent: result.data.approvedContent || undefined,
         corrections: result.data.corrections && result.data.corrections.length > 0 ? result.data.corrections : undefined,
+        reviewCount: reviewCount + 1,
+      };
+    }
+
+    const truncation = findTruncatedApproval(result.data.postText, state.codeSnippets?.length ?? 0);
+    if (truncation !== null) {
+      const reason = truncation === 'too_short'
+        ? `the approved postText is only ${result.data.postText.trim().length} chars — too short to be a real, complete post.`
+        : `the approved postText is missing [IMAGE_CODE_${truncation.join('], [IMAGE_CODE_')}] placeholder(s) even though ${state.codeSnippets!.length} code snippet(s) were generated.`;
+      console.warn(`[Reviewer] ⚠️  Deterministic check: approval looks truncated — ${reason} Forcing a corrective retry instead of publishing it.`);
+      return {
+        reviewFeedback: `Your previous approved postText was incomplete/truncated (${reason}). Rewrite the COMPLETE final post text from the technicalDraft in US English, replacing every [CODE_SNIPPET_N] with the matching [IMAGE_CODE_N] placeholder, and only set isApproved to true once postText contains the full post from start to finish.`,
+        reviewerSearchQuery: '',
+        approvedContent: state.technicalDraft || undefined,
         reviewCount: reviewCount + 1,
       };
     }

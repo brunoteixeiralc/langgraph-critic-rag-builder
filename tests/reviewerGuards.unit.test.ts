@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { findBrokenCodeSnippets } from '../src/graph/nodes/reviewerNode.ts';
+import { findBrokenCodeSnippets, findTruncatedApproval } from '../src/graph/nodes/reviewerNode.ts';
 
 // Regression coverage for the exact bug chased down in production: the
 // specialist LLM sometimes echoes the "[CODE_SNIPPET_N]" placeholder token
@@ -45,5 +45,46 @@ test('findBrokenCodeSnippets', async (t) => {
   await t.test('múltiplos snippets quebrados são todos reportados', () => {
     const snippets = ['[CODE_SNIPPET_1]', '', 'const real = true;'];
     assert.deepStrictEqual(findBrokenCodeSnippets(snippets), [1, 2]);
+  });
+});
+
+// Regression coverage for a real production bug: the Reviewer has to
+// reproduce the entire final post inside one structured-output field on
+// approval — for a long draft, a model can quietly cut that field short
+// (still valid JSON, just incomplete content) instead of erroring out. The
+// post that shipped was ~250 chars, ended mid-sentence inside a raw code
+// line, and had zero [IMAGE_CODE_N] placeholders despite 3 code snippets
+// having been generated.
+test('findTruncatedApproval', async (t) => {
+  await t.test('post longo com todos os placeholders presentes não é truncado', () => {
+    const post = 'A'.repeat(150) + ' [IMAGE_CODE_1] more text ' + '[IMAGE_CODE_2]';
+    assert.strictEqual(findTruncatedApproval(post, 2), null);
+  });
+
+  await t.test('post text-only (sem snippets) só precisa passar do tamanho mínimo', () => {
+    assert.strictEqual(findTruncatedApproval('A'.repeat(150), 0), null);
+  });
+
+  await t.test('post curto demais é reportado como too_short mesmo sem snippets', () => {
+    assert.strictEqual(findTruncatedApproval('short', 0), 'too_short');
+  });
+
+  await t.test('post curto demais é reportado como too_short mesmo com placeholders presentes', () => {
+    assert.strictEqual(findTruncatedApproval('[IMAGE_CODE_1]', 1), 'too_short');
+  });
+
+  await t.test('faltando um placeholder no meio é reportado (1-indexed)', () => {
+    const post = 'A'.repeat(150) + ' [IMAGE_CODE_1] text [IMAGE_CODE_3]';
+    assert.deepStrictEqual(findTruncatedApproval(post, 3), [2]);
+  });
+
+  await t.test('faltando todos os placeholders é reportado', () => {
+    const post = 'A'.repeat(150);
+    assert.deepStrictEqual(findTruncatedApproval(post, 2), [1, 2]);
+  });
+
+  await t.test('placeholders fora de ordem ainda contam como presentes', () => {
+    const post = 'A'.repeat(150) + ' [IMAGE_CODE_2] then [IMAGE_CODE_1]';
+    assert.strictEqual(findTruncatedApproval(post, 2), null);
   });
 });
