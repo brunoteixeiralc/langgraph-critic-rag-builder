@@ -92,6 +92,17 @@ export function renderPreviewPage(jobId: string): string {
   }
   .badge-ok { background: #e7f6ec; color: #1a7f37; }
   .badge-warn { background: #fdecea; color: #c0392b; }
+  .feedback {
+    margin-top: 10px;
+    padding: 10px 12px;
+    background: #fdecea;
+    border: 1px solid #f3c9c4;
+    border-radius: 6px;
+    color: #7a2e26;
+    font-size: 12.5px;
+    line-height: 1.5;
+    white-space: normal;
+  }
   #canvasContainer {
     width: 100%;
     max-width: 640px;
@@ -233,6 +244,13 @@ export function renderPreviewPage(jobId: string): string {
     html += approved
       ? '<span class="badge badge-ok">Aprovado pelo reviewer</span>'
       : '<span class="badge badge-warn">NAO aprovado — reviewCount: ' + escapeHtml(data.reviewCount) + '</span>';
+    // The server has always returned reviewFeedback (the reviewer's own
+    // explanation of what's wrong, from its last pass), the page just never
+    // showed it — you'd see "NAO aprovado" with no way to know why without
+    // digging into LangSmith. Show it whenever the post wasn't approved.
+    if (!approved && data.reviewFeedback) {
+      html += '<div class="feedback"><strong>Motivo da reprovacao:</strong><br>' + escapeHtml(data.reviewFeedback).replace(/\\n/g, '<br>') + '</div>';
+    }
     headerEl.innerHTML = html;
   }
 
@@ -265,8 +283,16 @@ export function renderPreviewPage(jobId: string): string {
   // Splits "some text [IMAGE_CODE_1] more text" into ordered
   // {type:'text'|'image', ...} segments so the layout pass below can walk
   // through them top-to-bottom in the exact order they appear in the post.
+  //
+  // Matches [IMAGE_CODE_N] (the approved/final post format) AND
+  // [CODE_SNIPPET_N] (what an unapproved draft still contains — the
+  // specialist's own placeholder, never swapped since that only happens on
+  // approval in reviewerNode.ts). Same N in both, same codeImages lookup —
+  // this lets the preview render real code images even for a rejected
+  // draft, which used to just show the raw "[CODE_SNIPPET_N]" token as
+  // plain text with no image at all.
   function splitByPlaceholders(text) {
-    var regex = /\\[IMAGE_CODE_(\\d+)\\]/g;
+    var regex = /\\[(?:IMAGE_CODE|CODE_SNIPPET)_(\\d+)\\]/g;
     var segments = [];
     var lastIndex = 0;
     var match;
