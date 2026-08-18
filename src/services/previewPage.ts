@@ -239,8 +239,20 @@ export function renderPreviewPage(jobId: string): string {
   function renderCard(data, key) {
     var text = data.finalPostText || data.unapprovedDraft || '(sem conteudo)';
     var imagesByIndex = {};
-    (data.codeImages || []).forEach(function (img, i) {
-      imagesByIndex[i + 1] = img; // [IMAGE_CODE_1] -> codeImages[0], 1-indexed placeholders
+    (data.codeImages || []).forEach(function (img) {
+      // Filenames are always "snippet_N.png" (see imageExtractorNode.ts),
+      // N being the ORIGINAL 1-indexed snippet number — not the array
+      // position. If any snippet failed to render (a real, observed
+      // failure mode: Carbonara can time out on some snippets but not
+      // others), codeImages ends up shorter than codeSnippets and the
+      // surviving entries shift left in the array. Keying by array
+      // position (the old "i + 1" approach) then silently maps a real
+      // image to the WRONG [IMAGE_CODE_N] placeholder instead of just
+      // skipping the missing one. Parsing N from the filename is correct
+      // regardless of how many images failed or where.
+      var match = /snippet_(\d+)\.png$/.exec(img.filename || '');
+      if (!match) { console.warn('Preview: could not parse snippet index from filename', img.filename); return; }
+      imagesByIndex[parseInt(match[1], 10)] = img;
     });
 
     var segments = splitByPlaceholders(text);
