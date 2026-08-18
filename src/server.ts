@@ -346,8 +346,14 @@ app.get('/result/:jobId/preview', (req: Request, res: Response) => {
   // override instead of loosening CSP for every route.
   res.setHeader(
     'Content-Security-Policy',
-    "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; " +
-    "style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; connect-src 'self';",
+    // 'unsafe-eval' is required by PixiJS v8 itself (uses `new Function()`
+    // internally for mask/filter codegen) — confirmed via a real browser
+    // console error on first deploy ("Current environment does not allow
+    // unsafe-eval"), not a guess. connect-src includes cdnjs so the
+    // browser's devtools can fetch pixi.min.js's source map without a CSP
+    // console warning (cosmetic only — app worked fine without it too).
+    "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com; " +
+    "style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; connect-src 'self' https://cdnjs.cloudflare.com;",
   );
   res.status(200).set('Content-Type', 'text/html; charset=utf-8').send(renderPreviewPage(jobId));
 });
