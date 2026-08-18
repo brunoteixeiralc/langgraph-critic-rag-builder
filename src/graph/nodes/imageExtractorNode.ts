@@ -126,20 +126,76 @@ Valid niche names: "ios", "node_react", "ai_engineering".`;
     // HTTP wrapper in src/server.ts) can still get the rendered images back.
     const codeImages: { index: number; filename: string; base64: string }[] = [];
 
-    // Carbonara is the only external fetch in the project that had no
-    // timeout (webContentService's fetchUrlContent uses 15s) — if the API
-    // ever hangs, this used to be able to pin a job "running" forever.
-    const CARBONARA_TIMEOUT_MS = 15_000;
+    // Carbonara doesn't just serve a pre-rendered image — per its own repo
+    // (petersolopov/carbonara), it launches a headless Chromium via
+    // Puppeteer, navigates to carbon.now.sh, and screenshots the result.
+    // That's inherently slow, and it's a free personal project with no SLA,
+    // not a production image API. 15s was too tight for that: two real runs
+    // in a row saw 100% (5/5, 6/6) of snippets time out. 30s gives a
+    // Puppeteer cold-start + navigation + render + screenshot realistic room.
+    const CARBONARA_TIMEOUT_MS = 30_000;
 
-    // A real run with 6 snippets fired all 6 Carbonara requests at once via
-    // Promise.all and every single one timed out at 15s — earlier runs with
-    // 1-3 snippets had worked fine. Carbonara is a free public API with no
-    // auth; it's a reasonable guess that firing 6 concurrent requests at it
-    // tripped a per-IP/global concurrency limit that a handful of parallel
-    // requests doesn't. Capping concurrency keeps the "render snippets in
-    // parallel, not one-by-one" win from before while staying under
-    // whatever ceiling Carbonara actually has.
-    const CARBONARA_MAX_CONCURRENCY = 3;
+    // A real run firing all 6 requests at once via Promise.all saw every
+    // single one time out; capping at 3 didn't help either (still 5/5
+    // timeouts on a later run) — the bottleneck isn't really concurrency at
+    // this service, it's raw per-request latency (see above). Still capping
+    // at 2 rather than removing the limit entirely: no reason to hand a
+    // free, unauthenticated, browser-automation-backed service more
+    // simultaneous Chromium instances than necessary.
+    const CARBONARA_MAX_CONCURRENCY = 2;
+
+    // Given how consistently every snippet has been timing out, treating a
+    // single attempt as final wastes the code (and the LLM work that
+    // produced it) on what's often just a slow/flaky upstream call. One
+    // retry, no backoff needed — the timeout itself already burns 30s.
+    const CARBONARA_MAX_ATTEMPTS = 2;
+
+    async function fetchCarbonaraImage(index: number, codeContent: string): Promise<Buffer | null> {
+      const payload = {
+        code: codeContent,
+        backgroundColor: "rgba(171, 184, 195, 1)",
+        theme: "dracula",
+        windowTheme: "mac",
+        dropShadow: true,
+        paddingVertical: "56px",
+        paddingHorizontal: "56px"
+      };
+
+      for (let attempt = 1; attempt <= CARBONARA_MAX_ATTEMPTS; attempt++) {
+        console.log(`[Carbonara API] Sending request for snippet ${index + 1} (attempt ${attempt}/${CARBONARA_MAX_ATTEMPTS}, ${codeContent.length} chars). Preview: "${codeContent.substring(0, 60).replace(/\n/g, ' ')}..."`);
+
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), CARBONARA_TIMEOUT_MS);
+
+        try {
+          const response = await fetch('https://carbonara.solopov.dev/api/cook', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            signal: controller.signal,
+          });
+
+          if (response.ok) {
+            const buffer = await response.arrayBuffer();
+            return Buffer.from(buffer);
+          }
+
+          const responseBody = await response.text().catch(() => 'Unable to read response body');
+          console.warn(`[-] HTTP error from Carbonara API for snippet ${index + 1} (attempt ${attempt}/${CARBONARA_MAX_ATTEMPTS}): ${response.status} ${response.statusText}`);
+          console.warn(`[-] Carbonara API Error Response Body:\n${responseBody}`);
+        } catch (e) {
+          const isTimeout = e instanceof Error && e.name === 'AbortError';
+          console.error(
+            `[-] ${isTimeout ? `Carbonara request for snippet ${index + 1} timed out after ${CARBONARA_TIMEOUT_MS / 1000}s (attempt ${attempt}/${CARBONARA_MAX_ATTEMPTS})` : `Network/Fetch error generating Carbonara image for snippet ${index + 1} (attempt ${attempt}/${CARBONARA_MAX_ATTEMPTS})`}:`,
+            isTimeout ? undefined : e,
+          );
+        } finally {
+          clearTimeout(timeout);
+        }
+      }
+
+      return null;
+    }
 
     // One snippet at a time was purely self-inflicted latency: each render
     // is an independent HTTP call to Carbonara with no dependency on the
@@ -166,54 +222,17 @@ Valid niche names: "ios", "node_react", "ai_engineering".`;
         return null;
       }
 
-      const payload = {
-        code: codeContent,
-        backgroundColor: "rgba(171, 184, 195, 1)",
-        theme: "dracula",
-        windowTheme: "mac",
-        dropShadow: true,
-        paddingVertical: "56px",
-        paddingHorizontal: "56px"
-      };
-
-      console.log(`[Carbonara API] Sending request for snippet ${index + 1} (${codeContent.length} chars). Preview: "${codeContent.substring(0, 60).replace(/\n/g, ' ')}..."`);
-
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), CARBONARA_TIMEOUT_MS);
-
-      try {
-        const response = await fetch('https://carbonara.solopov.dev/api/cook', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-          signal: controller.signal,
-        });
-
-        if (response.ok) {
-          const buffer = await response.arrayBuffer();
-          const pngBuffer = Buffer.from(buffer);
-          const filename = `snippet_${index + 1}.png`;
-          const imgPath = path.join(outputDir, filename);
-          await fs.writeFile(imgPath, pngBuffer);
-          console.log(`[+] Code image saved: ${imgPath}`);
-          return { index: index + 1, filename, base64: pngBuffer.toString('base64') };
-        }
-
-        const responseBody = await response.text().catch(() => 'Unable to read response body');
-        console.warn(`[-] HTTP error from Carbonara API for snippet ${index + 1}: ${response.status} ${response.statusText}`);
-        console.warn(`[-] Carbonara API Error Response Body:\n${responseBody}`);
-        console.warn(`[-] Sent Payload:`, JSON.stringify(payload, null, 2));
+      const pngBuffer = await fetchCarbonaraImage(index, codeContent);
+      if (!pngBuffer) {
+        console.error(`[-] Snippet ${index + 1}: all ${CARBONARA_MAX_ATTEMPTS} Carbonara attempts failed — no image for this snippet.`);
         return null;
-      } catch (e) {
-        const isTimeout = e instanceof Error && e.name === 'AbortError';
-        console.error(
-          `[-] ${isTimeout ? `Carbonara request for snippet ${index + 1} timed out after ${CARBONARA_TIMEOUT_MS / 1000}s` : `Network/Fetch error generating Carbonara image for snippet ${index + 1}`}:`,
-          isTimeout ? undefined : e,
-        );
-        return null;
-      } finally {
-        clearTimeout(timeout);
       }
+
+      const filename = `snippet_${index + 1}.png`;
+      const imgPath = path.join(outputDir, filename);
+      await fs.writeFile(imgPath, pngBuffer);
+      console.log(`[+] Code image saved: ${imgPath}`);
+      return { index: index + 1, filename, base64: pngBuffer.toString('base64') };
     }
 
     if (state.codeSnippets && state.codeSnippets.length > 0) {
