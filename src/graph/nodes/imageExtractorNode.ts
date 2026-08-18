@@ -30,6 +30,32 @@ export function getExtension(niche?: string, code?: string): string {
   return 'ts';
 }
 
+// Runs fn over items with at most `limit` in flight at once, preserving
+// result order. Sits between "one at a time" (slow, self-inflicted latency)
+// and unbounded Promise.all (tripped a rate limit on the free Carbonara API
+// with 6 concurrent requests in a real run — see CARBONARA_MAX_CONCURRENCY
+// below). No new dependency: a fixed-size pool of workers that each pull the
+// next index off a shared cursor until the queue is empty.
+export async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker(): Promise<void> {
+    while (nextIndex < items.length) {
+      const current = nextIndex++;
+      results[current] = await fn(items[current], current);
+    }
+  }
+
+  const workerCount = Math.max(1, Math.min(limit, items.length));
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return results;
+}
+
 export function createImageExtractorNode() {
   return async (state: GraphState, runtime?: Runtime): Promise<Partial<GraphState>> => {
     console.log("\n[Image Extractor] Preparing final package...");
@@ -105,10 +131,21 @@ Valid niche names: "ios", "node_react", "ai_engineering".`;
     // ever hangs, this used to be able to pin a job "running" forever.
     const CARBONARA_TIMEOUT_MS = 15_000;
 
+    // A real run with 6 snippets fired all 6 Carbonara requests at once via
+    // Promise.all and every single one timed out at 15s — earlier runs with
+    // 1-3 snippets had worked fine. Carbonara is a free public API with no
+    // auth; it's a reasonable guess that firing 6 concurrent requests at it
+    // tripped a per-IP/global concurrency limit that a handful of parallel
+    // requests doesn't. Capping concurrency keeps the "render snippets in
+    // parallel, not one-by-one" win from before while staying under
+    // whatever ceiling Carbonara actually has.
+    const CARBONARA_MAX_CONCURRENCY = 3;
+
     // One snippet at a time was purely self-inflicted latency: each render
     // is an independent HTTP call to Carbonara with no dependency on the
     // others, so a post with 3 snippets paid 3x the round-trip for no
-    // reason. Render all of them concurrently instead.
+    // reason. Render them concurrently, bounded by CARBONARA_MAX_CONCURRENCY
+    // above.
     async function renderSnippet(
       index: number,
       rawSnippet: string,
@@ -180,8 +217,10 @@ Valid niche names: "ios", "node_react", "ai_engineering".`;
     }
 
     if (state.codeSnippets && state.codeSnippets.length > 0) {
-      const rendered = await Promise.all(
-        state.codeSnippets.map((snippet, i) => renderSnippet(i, snippet)),
+      const rendered = await mapWithConcurrency(
+        state.codeSnippets,
+        CARBONARA_MAX_CONCURRENCY,
+        (snippet, i) => renderSnippet(i, snippet),
       );
       for (const img of rendered) {
         if (img) codeImages.push(img);

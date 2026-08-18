@@ -20,9 +20,17 @@ const BASE_DELAY_MS = 2000; // 2s, 4s, 8s (exponential backoff)
 // which is why LangSmith showed a trace still executing well after the
 // preview page got its error. Bounding each individual call means a stall
 // fails fast and retries (below) instead of silently eating the whole
-// budget. 90s is generous for a single structured-output call; the graph as
-// a whole can still take several minutes across review loops.
-const LLM_CALL_TIMEOUT_MS = 90_000;
+// budget.
+//
+// Started at 90s; bumped to 150s after a real run on a heavy Reviewer call
+// (6 code snippets + reproducing the entire post in one structured-output
+// field) hit the 90s ceiling twice in a row before a 3rd attempt finally
+// came back in ~20s — that's the model genuinely being slow on a big
+// payload, not hanging, and it burned a whole review attempt (out of only
+// MAX_REVIEW_ATTEMPTS=3) on pure infrastructure retries before any actual
+// content review happened. The graph as a whole can still take several
+// minutes across review loops regardless of this per-call bound.
+const LLM_CALL_TIMEOUT_MS = 150_000;
 
 export function isRetryableError(error: unknown): boolean {
   const err = error as { status?: number; lc_error_code?: string; message?: string; name?: string } | undefined;
