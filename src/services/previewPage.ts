@@ -102,6 +102,25 @@ export function renderPreviewPage(jobId: string): string {
     box-shadow: 0 1px 2px rgba(0,0,0,0.08);
   }
   #canvasContainer canvas { display: block; }
+
+  /* Skeleton shown while the job is pending/running, instead of a blank
+     card — purely cosmetic, no data. */
+  .skeleton { padding: 24px; }
+  .skeleton-line {
+    height: 14px;
+    border-radius: 4px;
+    background: linear-gradient(90deg, #eee 25%, #f5f5f5 37%, #eee 63%);
+    background-size: 400% 100%;
+    animation: skeleton-pulse 1.4s ease infinite;
+    margin-bottom: 12px;
+  }
+  .skeleton-line.w60 { width: 60%; }
+  .skeleton-line.w80 { width: 80%; }
+  .skeleton-line.block { height: 120px; border-radius: 8px; margin-top: 4px; }
+  @keyframes skeleton-pulse {
+    0% { background-position: 100% 50%; }
+    100% { background-position: 0 50%; }
+  }
 </style>
 </head>
 <body>
@@ -153,9 +172,12 @@ export function renderPreviewPage(jobId: string): string {
       .catch(function (err) { setStatus(err.message, true); });
   }
 
+  var skeletonShown = false;
+
   function handleResult(data, key) {
     if (data.status === 'pending' || data.status === 'running') {
       setStatus('Status: ' + data.status + ' — atualizando a cada 3s...', false);
+      showSkeleton();
       pollTimer = setTimeout(function () { poll(key); }, 3000);
       return;
     }
@@ -164,8 +186,25 @@ export function renderPreviewPage(jobId: string): string {
       return;
     }
     setStatus('Pronto.', false);
+    skeletonShown = false;
     renderHeader(data);
     renderCard(data, key);
+  }
+
+  // Pulsing placeholder blocks instead of a blank card while waiting.
+  // Guarded so it doesn't get re-injected (and its CSS animation restarted)
+  // on every 3s poll tick — only the first time we see pending/running.
+  function showSkeleton() {
+    if (skeletonShown) return;
+    skeletonShown = true;
+    canvasContainer.innerHTML =
+      '<div class="skeleton">' +
+      '<div class="skeleton-line w80"></div>' +
+      '<div class="skeleton-line w60"></div>' +
+      '<div class="skeleton-line block"></div>' +
+      '<div class="skeleton-line w80"></div>' +
+      '<div class="skeleton-line w60"></div>' +
+      '</div>';
   }
 
   function setStatus(msg, isError) {
@@ -280,6 +319,10 @@ export function renderPreviewPage(jobId: string): string {
         lineHeight: 22,
       };
 
+      // First pass: lay everything out with its full, final content so
+      // every position/size is correct — this is what decides the card's
+      // final height. Nothing is hidden yet.
+      var revealQueue = [];
       segments.forEach(function (seg) {
         if (seg.type === 'text') {
           var content = seg.content.replace(/^\\n+|\\n+$/g, '');
@@ -289,6 +332,7 @@ export function renderPreviewPage(jobId: string): string {
           t.y = y;
           app.stage.addChild(t);
           y += t.height + 12;
+          revealQueue.push({ kind: 'text', obj: t, fullText: content });
         } else if (seg.type === 'image' && seg.texture && !seg.skip) {
           var sprite = new PIXI.Sprite(seg.texture);
           var scale = Math.min(1, contentWidth / seg.texture.width);
@@ -298,28 +342,119 @@ export function renderPreviewPage(jobId: string): string {
           sprite.y = y;
           app.stage.addChild(sprite);
           y += sprite.height + 16;
+          revealQueue.push({ kind: 'image', obj: sprite });
         }
       });
 
+      var hashtagContainer = null;
       if (hashtags && hashtags.length > 0) {
-        var tagsStyle = {
-          fontFamily: 'Arial, Helvetica, sans-serif',
-          fontSize: 14,
-          fill: 0x0a66c2,
-          wordWrap: true,
-          wordWrapWidth: contentWidth,
-          lineHeight: 20,
-        };
-        var tagsObj = new PIXI.Text({ text: hashtags.join(' '), style: tagsStyle });
-        tagsObj.x = PADDING;
-        tagsObj.y = y;
-        app.stage.addChild(tagsObj);
-        y += tagsObj.height;
+        hashtagContainer = layoutHashtags(hashtags, contentWidth);
+        hashtagContainer.x = PADDING;
+        hashtagContainer.y = y;
+        app.stage.addChild(hashtagContainer);
+        y += hashtagContainer._contentHeight;
       }
 
       y += PADDING;
       app.renderer.resize(CARD_WIDTH, Math.max(200, y));
+
+      // Second pass: layout/sizing is locked in now, so hide everything and
+      // reveal it top-to-bottom — typewriter for text, fade-in for images,
+      // pop-in for hashtags. Positions never change from here on, this is
+      // purely visual.
+      revealQueue.forEach(function (item) {
+        if (item.kind === 'text') { item.obj.text = ''; }
+        else { item.obj.alpha = 0; }
+      });
+      if (hashtagContainer) { hashtagContainer.alpha = 0; hashtagContainer.scale.set(0.95); }
+
+      revealSequentially(revealQueue, 0, function () {
+        if (hashtagContainer) popIn(hashtagContainer);
+      });
     });
+  }
+
+  // Reveals revealQueue items one at a time, only starting the next once
+  // the current one's animation finishes — mimics reading the post top to
+  // bottom instead of everything popping in at once.
+  function revealSequentially(queue, i, onDone) {
+    if (i >= queue.length) { onDone(); return; }
+    var item = queue[i];
+    var goNext = function () { revealSequentially(queue, i + 1, onDone); };
+    if (item.kind === 'text') { typewriteText(item.obj, item.fullText, goNext); }
+    else { fadeIn(item.obj, goNext); }
+  }
+
+  // Reveals characters a few at a time via requestAnimationFrame, scaled so
+  // any paragraph length takes roughly the same ~1s regardless of how long
+  // the text is (a 800-char paragraph revealing 1 char/frame would take
+  // ~13s at 60fps, which drags).
+  function typewriteText(textObj, fullText, onDone) {
+    var len = fullText.length;
+    if (len === 0) { onDone(); return; }
+    var charsPerFrame = Math.max(1, Math.ceil(len / 60));
+    var shown = 0;
+    function step() {
+      shown = Math.min(len, shown + charsPerFrame);
+      textObj.text = fullText.slice(0, shown);
+      if (shown < len) { requestAnimationFrame(step); } else { onDone(); }
+    }
+    requestAnimationFrame(step);
+  }
+
+  function fadeIn(displayObject, onDone) {
+    var duration = 300;
+    var start = null;
+    function step(ts) {
+      if (start === null) start = ts;
+      var t = Math.min(1, (ts - start) / duration);
+      displayObject.alpha = t;
+      if (t < 1) { requestAnimationFrame(step); } else { onDone(); }
+    }
+    requestAnimationFrame(step);
+  }
+
+  function popIn(displayObject) {
+    var duration = 250;
+    var start = null;
+    function step(ts) {
+      if (start === null) start = ts;
+      var t = Math.min(1, (ts - start) / duration);
+      displayObject.alpha = t;
+      var s = 0.95 + 0.05 * t;
+      displayObject.scale.set(s);
+      if (t < 1) { requestAnimationFrame(step); }
+    }
+    requestAnimationFrame(step);
+  }
+
+  // Builds hashtags as individual interactive PIXI.Text tokens (not one
+  // joined string) so each one can react to hover on its own — manual
+  // word-wrap since Pixi containers don't do CSS-style inline flow.
+  function layoutHashtags(hashtags, maxWidth) {
+    var container = new PIXI.Container();
+    var x = 0, rowY = 0;
+    var lineHeight = 22;
+    var gap = 10;
+    hashtags.forEach(function (tag) {
+      var style = {
+        fontFamily: 'Arial, Helvetica, sans-serif',
+        fontSize: 14,
+        fill: 0x0a66c2,
+      };
+      var t = new PIXI.Text({ text: tag, style: style });
+      if (x > 0 && x + t.width > maxWidth) { x = 0; rowY += lineHeight; }
+      t.x = x;
+      t.y = rowY;
+      t.eventMode = 'static';
+      t.cursor = 'pointer';
+      t.on('pointerover', function () { t.style.fill = 0x004182; });
+      t.on('pointerout', function () { t.style.fill = 0x0a66c2; });
+      container.addChild(t);
+      x += t.width + gap;
+    });
+    container._contentHeight = rowY + lineHeight;
+    return container;
   }
 })();
 </script>
