@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { findBrokenCodeSnippets, findTruncatedApproval } from '../src/graph/nodes/reviewerNode.ts';
+import { findBrokenCodeSnippets, findTruncatedApproval, looksLikeReasoningLeak } from '../src/graph/nodes/reviewerNode.ts';
 
 // Regression coverage for the exact bug chased down in production: the
 // specialist LLM sometimes echoes the "[CODE_SNIPPET_N]" placeholder token
@@ -86,5 +86,32 @@ test('findTruncatedApproval', async (t) => {
   await t.test('placeholders fora de ordem ainda contam como presentes', () => {
     const post = 'A'.repeat(150) + ' [IMAGE_CODE_2] then [IMAGE_CODE_1]';
     assert.strictEqual(findTruncatedApproval(post, 2), null);
+  });
+});
+
+// Regression coverage for a real production bug: with structured output
+// forced via tool-calling, a reasoning model's 'feedback' field ended up
+// containing its raw internal monologue instead of a verdict — burning a
+// review attempt (out of only MAX_REVIEW_ATTEMPTS=3) on unusable text.
+test('looksLikeReasoningLeak', async (t) => {
+  await t.test('undefined ou string vazia não é reasoning leak', () => {
+    assert.strictEqual(looksLikeReasoningLeak(undefined), false);
+    assert.strictEqual(looksLikeReasoningLeak(null), false);
+    assert.strictEqual(looksLikeReasoningLeak(''), false);
+  });
+
+  await t.test('feedback normal e decisivo não é reasoning leak', () => {
+    const feedback = 'The draft claims `#expect(processExitsWith:)` is the correct macro, but the real API requires the `.failure` exit condition argument: `#expect(processExitsWith: .failure) { ... }`. Fix snippet 3.';
+    assert.strictEqual(looksLikeReasoningLeak(feedback), false);
+  });
+
+  await t.test('feedback com um "wait," isolado não é reasoning leak (falante mas decisivo)', () => {
+    const feedback = 'Wait, actually the version number cited (iOS 16) is wrong — the API was introduced in iOS 17. Reject and correct.';
+    assert.strictEqual(looksLikeReasoningLeak(feedback), false);
+  });
+
+  await t.test('monólogo real (do print de produção) é detectado como reasoning leak', () => {
+    const feedback = `The correct API is #expect(processExitsWith: .failure) { ... } — wait, that's what the draft has. Actually, the correct API is #expect(processExitsWith: .failure) { ... } — no, the real API is #expect(processExitsWith: .failure) { ... }. Hmm, I need to verify. Let me re-check carefully. I'm going in circles. I need to stop.`;
+    assert.strictEqual(looksLikeReasoningLeak(feedback), true);
   });
 });

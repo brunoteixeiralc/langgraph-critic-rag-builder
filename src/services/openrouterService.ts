@@ -127,7 +127,20 @@ export class OpenRouterService {
         // 'low' trims that hidden latency/token cost while keeping some
         // headroom, rather than 'none', which removes it entirely and risks
         // hurting the Reviewer's actual fact-checking judgment.
-        reasoning: { effort: 'low' },
+        //
+        // `exclude: true` added after a real Reviewer run: with structured
+        // output forced via tool-calling (providerStrategy below), the
+        // model's raw thinking trace ("wait, that's not right... actually
+        // the correct API is... no, let me recheck...") ended up AS the
+        // 'feedback' field's content instead of a clean verdict — reasoning
+        // leaking into the answer instead of staying in its own channel.
+        // `exclude: true` tells OpenRouter to still let the model reason
+        // internally but strip those tokens from what's returned, so only
+        // the final JSON answer comes back. (reviewerNode.ts also has a
+        // deterministic guard for this — see looksLikeReasoningLeak — since
+        // this is a provider-side behavior, not something we can guarantee
+        // from our end alone.)
+        reasoning: { effort: 'low', exclude: true },
       },
     });
   }

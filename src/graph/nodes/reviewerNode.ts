@@ -28,6 +28,26 @@ const PLACEHOLDER_PREFIX_RE = /^\[CODE_SNIPPET_\d+\]:?\s*/i;
 const MIN_APPROVED_POST_LENGTH = 100;
 const IMAGE_PLACEHOLDER_RE = /\[IMAGE_CODE_(\d+)\]/g;
 
+// A real production run showed the Reviewer's `feedback` field filled with
+// the model's raw internal monologue instead of a verdict — literally
+// "the correct API is X — wait, that's what the draft has... let me
+// re-check... I'm going in circles... I need to stop..." — hundreds of
+// words re-litigating the same claim with no conclusion. This is a
+// reasoning-model quirk (thinking tokens leaking into the structured
+// answer instead of staying in their own channel; openrouterService.ts now
+// sets `reasoning.exclude: true` to address it at the API level), but that
+// setting is a provider-side behavior we can't fully guarantee from here —
+// this is the deterministic backstop. Three or more of these markers in one
+// feedback string is not something a real, decisive review verdict would
+// ever contain.
+const REASONING_LEAK_MARKERS_RE = /\b(wait,|let me (re-?check|think|verify)|i'm going in circles|i need to stop|actually,? (the|that)|no,? it'?s|hmm,?\s)/gi;
+
+export function looksLikeReasoningLeak(feedback: string | undefined | null): boolean {
+  if (!feedback) return false;
+  const matches = feedback.match(REASONING_LEAK_MARKERS_RE);
+  return (matches?.length ?? 0) >= 3;
+}
+
 // Exported for tests. Returns the 1-indexed snippet numbers that have code
 // in state.codeSnippets but no matching [IMAGE_CODE_N] placeholder in the
 // final post text — or null if the post looks fine.
@@ -164,6 +184,15 @@ Review this draft:\n\n${state.technicalDraft}`;
       console.warn(`[Reviewer] Error analyzing draft: ${result.error || 'no data'}. Incrementing reviewCount.`);
       return {
         reviewFeedback: "System error during review, retry.",
+        reviewerSearchQuery: "",
+        reviewCount: reviewCount + 1,
+      };
+    }
+
+    if (!result.data.isApproved && looksLikeReasoningLeak(result.data.feedback)) {
+      console.warn(`[Reviewer] ⚠️  'feedback' looks like leaked reasoning, not a real verdict — treating as a system error instead of spending a review attempt on it. First 200 chars: "${result.data.feedback.slice(0, 200)}..."`);
+      return {
+        reviewFeedback: "System error during review (model output malformed — internal reasoning leaked into the answer instead of a clean verdict), retry.",
         reviewerSearchQuery: "",
         reviewCount: reviewCount + 1,
       };
