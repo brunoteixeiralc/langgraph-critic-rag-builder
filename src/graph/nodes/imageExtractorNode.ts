@@ -3,6 +3,8 @@ import path from 'path';
 import type { Runtime } from '@langchain/langgraph';
 import type { GraphState } from '../graph.ts';
 import { MAX_REVIEW_ATTEMPTS } from './edgeConditions.ts';
+import { codeToImage } from 'shiki-image';
+import type { BundledLanguage } from 'shiki';
 
 // Minimum length for a technicalDraft to be considered salvageable when the
 // review loop is cut off at MAX_REVIEW_ATTEMPTS without approval.
@@ -28,6 +30,16 @@ export function getExtension(niche?: string, code?: string): string {
     return 'ts';
   }
   return 'ts';
+}
+
+// Maps the on-disk extension (from getExtension above) to a Shiki grammar
+// name for the fallback renderer below. Kept as its own tiny function
+// rather than folding into getExtension because the two vocabularies
+// diverge (file extensions vs. Shiki's language ids).
+function shikiLangForExtension(ext: string): BundledLanguage {
+  if (ext === 'swift') return 'swift';
+  if (ext === 'py') return 'python';
+  return 'typescript';
 }
 
 // Runs fn over items with at most `limit` in flight at once, preserving
@@ -197,6 +209,34 @@ Valid niche names: "ios", "node_react", "ai_engineering".`;
       return null;
     }
 
+    // Carbonara has no documented rate limit or SLA — it's a free,
+    // unauthenticated wrapper around a headless-Chromium screenshot of
+    // carbon.now.sh, run on whatever the maintainer's personal host can
+    // spare. In practice that's shown up as exactly the failure mode above:
+    // real runs where every single snippet times out, retry included.
+    // shiki-image (shiki for syntax highlighting + the Rust-based Takumi
+    // renderer, both running in-process via native bindings — no network
+    // call, no third party) renders in milliseconds and can't rate-limit or
+    // go down independently of this process. It won't match Carbonara's
+    // carbon.now.sh chrome (window controls, drop shadow) pixel-for-pixel,
+    // but a plain, correctly syntax-highlighted code image beats no image
+    // at all, which is what every prior run had for the snippets that timed
+    // out.
+    async function renderShikiFallback(codeContent: string, ext: string): Promise<Buffer | null> {
+      try {
+        const buffer = await codeToImage(codeContent, {
+          lang: shikiLangForExtension(ext),
+          theme: 'dracula', // same theme Carbonara is configured with above, for visual consistency between the two paths
+          format: 'png',
+          style: { padding: 32, borderRadius: 12 },
+        });
+        return Buffer.from(buffer);
+      } catch (e) {
+        console.error('[Shiki Fallback] Failed to render image locally:', e instanceof Error ? e.message : e);
+        return null;
+      }
+    }
+
     // One snippet at a time was purely self-inflicted latency: each render
     // is an independent HTTP call to Carbonara with no dependency on the
     // others, so a post with 3 snippets paid 3x the round-trip for no
@@ -222,10 +262,16 @@ Valid niche names: "ios", "node_react", "ai_engineering".`;
         return null;
       }
 
-      const pngBuffer = await fetchCarbonaraImage(index, codeContent);
+      let pngBuffer = await fetchCarbonaraImage(index, codeContent);
       if (!pngBuffer) {
-        console.error(`[-] Snippet ${index + 1}: all ${CARBONARA_MAX_ATTEMPTS} Carbonara attempts failed — no image for this snippet.`);
-        return null;
+        console.warn(`[-] Snippet ${index + 1}: all ${CARBONARA_MAX_ATTEMPTS} Carbonara attempts failed — falling back to local Shiki rendering.`);
+        pngBuffer = await renderShikiFallback(codeContent, ext);
+        if (pngBuffer) {
+          console.log(`[+] Snippet ${index + 1}: rendered via Shiki fallback (${pngBuffer.length} bytes).`);
+        } else {
+          console.error(`[-] Snippet ${index + 1}: Shiki fallback also failed — no image for this snippet.`);
+          return null;
+        }
       }
 
       const filename = `snippet_${index + 1}.png`;
