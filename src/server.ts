@@ -41,6 +41,8 @@ import cors from 'cors';
 import { buildPostGraph } from './graph/graph.ts';
 import { OpenRouterService } from './services/openrouterService.ts';
 import { renderPreviewPage } from './services/previewPage.ts';
+import { createImageExtractorNode } from './graph/nodes/imageExtractorNode.ts';
+import type { GraphState } from './graph/graph.ts';
 
 // Built once at module scope, not per-request. Both are stateless across
 // invocations: OpenRouterService only holds a configured ChatOpenAI client
@@ -220,6 +222,19 @@ function serializeGraphResult(
     buffer: Buffer.from(img.base64, 'base64'), // decode once here, not on every image request
   }));
 
+  // TEMP DIAGNOSTIC — a real run showed the graph state's codeImages fully
+  // populated (confirmed via LangSmith trace + deploy logs: Carbonara/Shiki
+  // both succeeded, 5/5 images saved) but the preview page reported zero
+  // images and never even issued a single GET to /images/:filename — i.e.
+  // the browser's `data.codeImages` was empty. This pins down exactly what
+  // this function saw at the one boundary between "graph finished with
+  // images" and "browser saw no images": if result.codeImages is >0 here,
+  // the bug is downstream of this function (job store, JSON response, or
+  // client-side parsing); if it's already 0 here, the bug is upstream in
+  // graph.invoke()'s return value itself. Remove once the image-mismatch
+  // bug is confirmed fixed.
+  console.log(`[Server] serializeGraphResult(${jobId}): result.codeImages=${(result.codeImages ?? []).length}`);
+
   const json = {
     niche: result.niche ?? null,
     folderSlug: result.suggestedFolderSlug ?? null,
@@ -299,6 +314,95 @@ app.post('/generate', generateLimiter, requireApiKey, (req: Request, res: Respon
       job.error = message;
       job.updatedAt = Date.now();
       console.error(`[Server] job ${jobId} failed:`, message);
+    }
+  })();
+
+  res.status(202).json({ jobId, statusUrl: `/result/${jobId}`, previewUrl: `/result/${jobId}/preview` });
+});
+
+// TEST-ONLY: exercises image generation (Carbonara + the Shiki fallback) and
+// the exact same job-store → serializeGraphResult → /result/:jobId →
+// preview pipeline as a real job — without going through orchestrator,
+// specialist, or reviewer, so it costs zero OpenRouter tokens. Built
+// specifically to debug the "images generated but preview shows none" bug:
+// a real run burns 2-3 minutes and however many OpenRouter calls just to
+// reach imageExtractor, which made every debug iteration on the
+// server/preview side expensive. This hits imageExtractorNode directly with
+// a small canned GraphState instead. Same requireApiKey gate as /generate;
+// deliberately NOT behind generateLimiter since it doesn't touch the LLM
+// budget that limiter exists to protect — Carbonara/Shiki calls are free.
+const MOCK_NICHES = ['ios', 'node_react', 'ai_engineering'] as const;
+type MockNiche = (typeof MOCK_NICHES)[number];
+
+const MOCK_SNIPPETS: Record<MockNiche, string[]> = {
+  ios: [
+    'import Testing\n\n@Test func additionWorks() {\n    #expect(2 + 2 == 4)\n}',
+    'import Testing\n\nstruct Calculator {\n    static func divide(_ a: Int, _ b: Int) throws -> Int {\n        guard b != 0 else { throw CalculatorError.divisionByZero }\n        return a / b\n    }\n}\n\nenum CalculatorError: Error {\n    case divisionByZero\n}',
+  ],
+  node_react: [
+    'function add(a: number, b: number): number {\n  return a + b;\n}\n\nconsole.log(add(2, 2));',
+    'import { useState } from "react";\n\nfunction Counter() {\n  const [count, setCount] = useState(0);\n  return <button onClick={() => setCount(count + 1)}>{count}</button>;\n}',
+  ],
+  ai_engineering: [
+    'def add(a: int, b: int) -> int:\n    return a + b\n\nprint(add(2, 2))',
+    'import numpy as np\n\ndef normalize(v: np.ndarray) -> np.ndarray:\n    norm = np.linalg.norm(v)\n    return v / norm if norm > 0 else v',
+  ],
+};
+
+app.post('/generate-mock', requireApiKey, (req: Request, res: Response) => {
+  const requestedNiche = typeof req.body?.niche === 'string' ? req.body.niche : 'ios';
+  const niche: MockNiche = (MOCK_NICHES as readonly string[]).includes(requestedNiche)
+    ? (requestedNiche as MockNiche)
+    : 'ios';
+
+  evictOldestJobIfAtCapacity();
+
+  const jobId = randomUUID();
+  const now = Date.now();
+  jobs.set(jobId, { status: 'pending', topic: `[MOCK] niche=${niche}`, createdAt: now, updatedAt: now });
+
+  console.log(`[Server] /generate-mock — job ${jobId} queued (niche: ${niche}, no OpenRouter calls).`);
+
+  (async () => {
+    const job = jobs.get(jobId);
+    if (!job) return;
+    job.status = 'running';
+    job.updatedAt = Date.now();
+
+    try {
+      const codeSnippets = MOCK_SNIPPETS[niche];
+      const mockState: GraphState = {
+        initialCommand: `[MOCK] Testing image generation for niche=${niche}`,
+        niche,
+        suggestedFolderSlug: 'mock-image-test',
+        codeSnippets,
+        finalPostText: `Testing image rendering for ${niche}.\n\n[IMAGE_CODE_1]\n\nSecond snippet:\n\n[IMAGE_CODE_2]`,
+        hashtags: ['#MockTest'],
+        reviewCount: 0,
+      };
+
+      const imageExtractor = createImageExtractorNode();
+      const { codeImages } = await imageExtractor(mockState);
+      const result = { ...mockState, codeImages };
+
+      // serializeGraphResult's second param type comes from
+      // buildPostGraph(...).invoke()'s LangGraph-derived return type, which
+      // (unlike the plain GraphState/z.infer type used for mockState above)
+      // marks every optional field as a required-but-possibly-undefined key.
+      // Structurally the same data either way — this cast just bridges the
+      // two type representations for this mock/test-only path.
+      const { json, images } = serializeGraphResult(jobId, result as Parameters<typeof serializeGraphResult>[1]);
+      job.status = 'done';
+      job.result = json;
+      job.images = images;
+      job.updatedAt = Date.now();
+      console.log(`[Server] mock job ${jobId} done — ${codeImages?.length ?? 0}/${codeSnippets.length} images generated.`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      job.status = 'error';
+      job.error = message;
+      job.updatedAt = Date.now();
+      console.error(`[Server] mock job ${jobId} failed:`, message);
     }
   })();
 
