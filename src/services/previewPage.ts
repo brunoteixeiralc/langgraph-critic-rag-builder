@@ -78,6 +78,21 @@ export function renderPreviewPage(jobId: string): string {
   }
   .keyRow button:hover { background: #004182; }
   #status { margin-top: 10px; font-size: 13px; color: #555; min-height: 16px; }
+  /* Hidden until a job actually finishes — nothing to copy/download while
+     pending/running, and no point cluttering the toolbar before then. */
+  #actions { display: none; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  #actions.visible { display: flex; }
+  #actions button {
+    padding: 8px 14px;
+    border: 1px solid #cfcfcf;
+    border-radius: 6px;
+    background: #fff;
+    color: #1a1a1a;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  #actions button:hover { background: #f3f2ef; }
+  #actions button:disabled { opacity: 0.5; cursor: not-allowed; }
   #headerInfo { margin-top: 10px; font-size: 13px; line-height: 1.6; }
   #headerInfo .topic { margin-bottom: 6px; }
   .badge {
@@ -144,6 +159,10 @@ export function renderPreviewPage(jobId: string): string {
     </div>
     <div id="status"></div>
     <div id="headerInfo"></div>
+    <div id="actions">
+      <button id="copyTextBtn" type="button">📋 Copiar texto p/ LinkedIn</button>
+      <button id="downloadImagesBtn" type="button">⬇️ Baixar imagens</button>
+    </div>
   </div>
 
   <div id="canvasContainer"></div>
@@ -156,12 +175,21 @@ export function renderPreviewPage(jobId: string): string {
   var statusEl = document.getElementById('status');
   var headerEl = document.getElementById('headerInfo');
   var canvasContainer = document.getElementById('canvasContainer');
+  var actionsEl = document.getElementById('actions');
+  var copyTextBtn = document.getElementById('copyTextBtn');
+  var downloadImagesBtn = document.getElementById('downloadImagesBtn');
   var pollTimer = null;
+  // Cached from the last successful handleResult() so the button handlers
+  // below don't need to re-fetch /result/:jobId — the data's already here.
+  var lastData = null;
+  var lastKey = null;
 
   loadBtn.addEventListener('click', function () { startPolling(); });
   apiKeyInput.addEventListener('keydown', function (e) {
     if (e.key === 'Enter') startPolling();
   });
+  copyTextBtn.addEventListener('click', function () { copyPostText(); });
+  downloadImagesBtn.addEventListener('click', function () { downloadAllImages(); });
 
   function startPolling() {
     var key = apiKeyInput.value.trim();
@@ -205,8 +233,117 @@ export function renderPreviewPage(jobId: string): string {
     }
     setStatus('Pronto.', false);
     skeletonShown = false;
+    lastData = data;
+    lastKey = key;
+    actionsEl.classList.add('visible');
+    // No point offering "baixar imagens" when there's nothing to download —
+    // e.g. a text-only post, or every snippet failed both Carbonara and the
+    // Shiki fallback.
+    downloadImagesBtn.style.display = (data.codeImages && data.codeImages.length > 0) ? '' : 'none';
     renderHeader(data);
     renderCard(data, key);
+  }
+
+  // Strips the [IMAGE_CODE_N]/[CODE_SNIPPET_N] placeholders and appends the
+  // hashtags — this is what you actually want on the clipboard for pasting
+  // into LinkedIn's post composer, where images get attached separately via
+  // its own upload UI, not inline in the text. The canvas above renders the
+  // placeholder version (with real images swapped in) for previewing the
+  // finished layout; this is the "ready to paste" version.
+  function getPlainPostText(data) {
+    var text = data.finalPostText || data.unapprovedDraft || '';
+    text = text.replace(/\\[(?:IMAGE_CODE|CODE_SNIPPET)_\\d+\\]/g, '');
+    // A removed placeholder that sat on its own line leaves 3+ consecutive
+    // newlines behind — collapse back down to a normal paragraph break.
+    text = text.replace(/\\n{3,}/g, '\\n\\n').trim();
+    if (data.hashtags && data.hashtags.length > 0) {
+      text += '\\n\\n' + data.hashtags.join(' ');
+    }
+    return text;
+  }
+
+  function copyPostText() {
+    if (!lastData) return;
+    var text = getPlainPostText(lastData);
+
+    function onCopied() { setStatus('Texto copiado! Cole no LinkedIn.', false); }
+    function onFailed(err) { setStatus('Erro ao copiar: ' + (err && err.message ? err.message : err), true); }
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(onCopied).catch(function (err) {
+        legacyCopy(text) ? onCopied() : onFailed(err);
+      });
+    } else {
+      legacyCopy(text) ? onCopied() : onFailed(new Error('Clipboard API indisponivel.'));
+    }
+  }
+
+  // Fallback for contexts where navigator.clipboard is unavailable/blocked
+  // (older browsers, some non-HTTPS edge cases) — the old hidden-textarea +
+  // execCommand trick. Deprecated but still broadly supported as a fallback.
+  function legacyCopy(text) {
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      var ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // Images are behind requireApiKey, so a plain <a href="..."> can't fetch
+  // them (no way to attach a custom header) — fetch each with the key,
+  // build an object URL, and trigger the download via a throwaway <a
+  // download>. Staggered rather than fired all at once: browsers throttle/
+  // block automatic multi-file downloads triggered from a single click past
+  // the first one or two.
+  function downloadAllImages() {
+    if (!lastData || !lastData.codeImages || lastData.codeImages.length === 0) return;
+    var images = lastData.codeImages;
+    var key = lastKey;
+    var index = 0;
+
+    setStatus('Baixando imagens (0/' + images.length + ')...', false);
+
+    function downloadNext() {
+      if (index >= images.length) {
+        setStatus('Imagens baixadas (' + images.length + '/' + images.length + ').', false);
+        return;
+      }
+      var img = images[index];
+      index += 1;
+      fetch(img.url, { headers: { 'x-api-key': key } })
+        .then(function (res) {
+          if (!res.ok) throw new Error('Falha ao buscar ' + img.filename);
+          return res.blob();
+        })
+        .then(function (blob) {
+          var objectUrl = URL.createObjectURL(blob);
+          var a = document.createElement('a');
+          a.href = objectUrl;
+          a.download = img.filename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setTimeout(function () { URL.revokeObjectURL(objectUrl); }, 2000);
+        })
+        .catch(function (err) {
+          console.warn('Download failed for', img.filename, err);
+        })
+        .then(function () {
+          setStatus('Baixando imagens (' + index + '/' + images.length + ')...', false);
+          setTimeout(downloadNext, 250);
+        });
+    }
+
+    downloadNext();
   }
 
   // Pulsing placeholder blocks instead of a blank card while waiting.
