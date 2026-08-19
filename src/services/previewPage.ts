@@ -276,8 +276,41 @@ export function renderPreviewPage(jobId: string): string {
     var segments = splitByPlaceholders(text);
 
     loadAllTextures(segments, imagesByIndex, key)
-      .then(function () { return buildPixiCard(segments, data.hashtags || []); })
+      .then(function () {
+        // loadAllTextures never rejects (each image job has its own catch),
+        // so a failed fetch/decode used to be visible only as a
+        // console.warn — the card would render with the image just quietly
+        // missing and no clue why. Surface it on the page itself: cheap to
+        // add, and turns "images didn't show up" reports into an actual
+        // reason (404 on the image route, decode error, etc) on the next test.
+        reportImageIssues(segments, imagesByIndex);
+        return buildPixiCard(segments, data.hashtags || []);
+      })
       .catch(function (err) { setStatus('Erro montando o preview: ' + err.message, true); });
+  }
+
+  function reportImageIssues(segments, imagesByIndex) {
+    var imageSegs = segments.filter(function (s) { return s.type === 'image'; });
+    if (imageSegs.length === 0) return;
+
+    var neverGenerated = imageSegs
+      .filter(function (s) { return !imagesByIndex[s.index]; })
+      .map(function (s) { return s.index; });
+    var failedToLoad = imageSegs
+      .filter(function (s) { return imagesByIndex[s.index] && s.skip; })
+      .map(function (s) { return '#' + s.index + (s.loadError ? ' (' + s.loadError + ')' : ''); });
+
+    if (neverGenerated.length === 0 && failedToLoad.length === 0) return;
+
+    var parts = [];
+    if (neverGenerated.length > 0) parts.push('Sem imagem gerada (Carbonara falhou): [' + neverGenerated.join(', ') + ']');
+    if (failedToLoad.length > 0) parts.push('Imagem gerada mas falhou ao carregar no preview: ' + failedToLoad.join(', '));
+
+    var div = document.createElement('div');
+    div.className = 'feedback';
+    div.style.marginTop = '10px';
+    div.innerHTML = '<strong>Imagens ausentes no preview:</strong><br>' + escapeHtml(parts.join(' — '));
+    headerEl.appendChild(div);
   }
 
   // Splits "some text [IMAGE_CODE_1] more text" into ordered
@@ -332,6 +365,7 @@ export function renderPreviewPage(jobId: string): string {
           .catch(function (err) {
             console.warn('Preview: skipping image', img && img.filename, err);
             seg.skip = true;
+            seg.loadError = (err && err.message) || String(err);
           });
       });
     return Promise.all(jobs);
