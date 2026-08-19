@@ -268,7 +268,23 @@ export function renderPreviewPage(jobId: string): string {
       // image to the WRONG [IMAGE_CODE_N] placeholder instead of just
       // skipping the missing one. Parsing N from the filename is correct
       // regardless of how many images failed or where.
-      var match = /snippet_(\d+)\.png$/.exec(img.filename || '');
+      // NOTE: this whole <script> block is text inside the outer template
+      // literal that builds the HTML page (see renderPreviewPage below) —
+      // backslashes here get processed as STRING escapes once, at build
+      // time, before this ever becomes real JS source in the browser. A
+      // single backslash (\d, \.) is not a recognized string escape, so JS
+      // silently drops it: the literal that shipped for months was actually
+      // /snippet_(d+).png$/ — matching literal "d" characters, not digits —
+      // so this ALWAYS failed to match a real "snippet_1.png" filename, always
+      // fell into the "no match" branch below, and imagesByIndex stayed empty.
+      // That's the actual root cause of "images generated but preview shows
+      // none": confirmed by comparing a real /result/:jobId response (codeImages
+      // correctly populated) against the browser never issuing a single
+      // /images/:filename request. Every backslash meant for the BROWSER's
+      // regex must be doubled (\\d, \\.) so it survives this outer escaping —
+      // splitByPlaceholders' regex below already does this correctly; this
+      // one didn't.
+      var match = /snippet_(\\d+)\\.png$/.exec(img.filename || '');
       if (!match) { console.warn('Preview: could not parse snippet index from filename', img.filename); return; }
       imagesByIndex[parseInt(match[1], 10)] = img;
     });
@@ -303,7 +319,7 @@ export function renderPreviewPage(jobId: string): string {
     if (neverGenerated.length === 0 && failedToLoad.length === 0) return;
 
     var parts = [];
-    if (neverGenerated.length > 0) parts.push('Sem imagem gerada (Carbonara falhou): [' + neverGenerated.join(', ') + ']');
+    if (neverGenerated.length > 0) parts.push('Sem imagem gerada (Carbonara e fallback Shiki falharam): [' + neverGenerated.join(', ') + ']');
     if (failedToLoad.length > 0) parts.push('Imagem gerada mas falhou ao carregar no preview: ' + failedToLoad.join(', '));
 
     var div = document.createElement('div');

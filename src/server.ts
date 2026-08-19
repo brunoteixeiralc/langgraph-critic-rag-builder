@@ -222,19 +222,6 @@ function serializeGraphResult(
     buffer: Buffer.from(img.base64, 'base64'), // decode once here, not on every image request
   }));
 
-  // TEMP DIAGNOSTIC — a real run showed the graph state's codeImages fully
-  // populated (confirmed via LangSmith trace + deploy logs: Carbonara/Shiki
-  // both succeeded, 5/5 images saved) but the preview page reported zero
-  // images and never even issued a single GET to /images/:filename — i.e.
-  // the browser's `data.codeImages` was empty. This pins down exactly what
-  // this function saw at the one boundary between "graph finished with
-  // images" and "browser saw no images": if result.codeImages is >0 here,
-  // the bug is downstream of this function (job store, JSON response, or
-  // client-side parsing); if it's already 0 here, the bug is upstream in
-  // graph.invoke()'s return value itself. Remove once the image-mismatch
-  // bug is confirmed fixed.
-  console.log(`[Server] serializeGraphResult(${jobId}): result.codeImages=${(result.codeImages ?? []).length}`);
-
   const json = {
     niche: result.niche ?? null,
     folderSlug: result.suggestedFolderSlug ?? null,
