@@ -128,25 +128,6 @@ export function renderPreviewPage(jobId: string): string {
     box-shadow: 0 1px 2px rgba(0,0,0,0.08);
   }
   #canvasContainer canvas { display: block; }
-
-  /* Skeleton shown while the job is pending/running, instead of a blank
-     card — purely cosmetic, no data. */
-  .skeleton { padding: 24px; }
-  .skeleton-line {
-    height: 14px;
-    border-radius: 4px;
-    background: linear-gradient(90deg, #eee 25%, #f5f5f5 37%, #eee 63%);
-    background-size: 400% 100%;
-    animation: skeleton-pulse 1.4s ease infinite;
-    margin-bottom: 12px;
-  }
-  .skeleton-line.w60 { width: 60%; }
-  .skeleton-line.w80 { width: 80%; }
-  .skeleton-line.block { height: 120px; border-radius: 8px; margin-top: 4px; }
-  @keyframes skeleton-pulse {
-    0% { background-position: 100% 50%; }
-    100% { background-position: 0 50%; }
-  }
 </style>
 </head>
 <body>
@@ -226,21 +207,20 @@ export function renderPreviewPage(jobId: string): string {
       .catch(function (err) { setStatus(err.message, true); });
   }
 
-  var skeletonShown = false;
-
   function handleResult(data, key) {
     if (data.status === 'pending' || data.status === 'running') {
       setStatus('Status: ' + data.status + ' — atualizando a cada 3s...', false);
-      showSkeleton();
+      showLoadingAnimation();
       pollTimer = setTimeout(function () { poll(key); }, 3000);
       return;
     }
     if (data.status === 'error') {
+      hideLoadingAnimation();
       setStatus('Job falhou: ' + data.error, true);
       return;
     }
+    hideLoadingAnimation();
     setStatus('Pronto.', false);
-    skeletonShown = false;
     lastData = data;
     lastKey = key;
     actionsEl.classList.add('visible');
@@ -369,17 +349,111 @@ export function renderPreviewPage(jobId: string): string {
   // Pulsing placeholder blocks instead of a blank card while waiting.
   // Guarded so it doesn't get re-injected (and its CSS animation restarted)
   // on every 3s poll tick — only the first time we see pending/running.
-  function showSkeleton() {
-    if (skeletonShown) return;
-    skeletonShown = true;
-    canvasContainer.innerHTML =
-      '<div class="skeleton">' +
-      '<div class="skeleton-line w80"></div>' +
-      '<div class="skeleton-line w60"></div>' +
-      '<div class="skeleton-line block"></div>' +
-      '<div class="skeleton-line w80"></div>' +
-      '<div class="skeleton-line w60"></div>' +
-      '</div>';
+  // Rotating captions while the job is pending/running — real per-node
+  // progress (which LangGraph node is currently executing) isn't exposed by
+  // the server today, so these just cycle on a timer to make the wait feel
+  // less dead, not to claim actual step-by-step tracking.
+  var LOADING_MESSAGES = [
+    '🧭 Classificando o topico...',
+    '✍️ Escrevendo o rascunho...',
+    '🔍 Revisando fatos e codigo...',
+    '🎨 Renderizando imagens do codigo...',
+    '☕ Ainda trabalhando nisso...',
+  ];
+
+  var loadingApp = null;
+
+  // PixiJS loading animation shown instead of a blank/skeleton card while
+  // pending/running: a bobbing rocket, a few drifting code-glyph particles,
+  // and a caption that rotates through LOADING_MESSAGES. Guarded so a poll
+  // tick every 3s while still pending doesn't tear down and rebuild it —
+  // only the very first pending/running response should start it.
+  function showLoadingAnimation() {
+    if (loadingApp) return;
+    canvasContainer.innerHTML = '';
+
+    var CARD_WIDTH = 640;
+    var CARD_HEIGHT = 260;
+    var app = new PIXI.Application();
+    loadingApp = app;
+
+    app.init({
+      width: CARD_WIDTH,
+      height: CARD_HEIGHT,
+      backgroundColor: 0xffffff,
+      antialias: true,
+      resolution: window.devicePixelRatio || 1,
+      autoDensity: true,
+    }).then(function () {
+      // The job finished (hideLoadingAnimation already ran) before this
+      // async init resolved — don't attach an orphaned canvas.
+      if (loadingApp !== app) { app.destroy(true, { children: true }); return; }
+      canvasContainer.appendChild(app.canvas);
+
+      var centerX = CARD_WIDTH / 2;
+      var centerY = 100;
+
+      var glyphs = ['{ }', '</>', '#', 'fn()', ';', '=>', '01', '[]'];
+      var particles = [];
+      for (var i = 0; i < 9; i++) {
+        var g = new PIXI.Text({
+          text: glyphs[i % glyphs.length],
+          style: { fontFamily: 'Menlo, Consolas, monospace', fontSize: 13 + Math.random() * 6, fill: 0xcfe0f5 },
+        });
+        g.x = 20 + Math.random() * (CARD_WIDTH - 40);
+        g.y = Math.random() * CARD_HEIGHT;
+        g.alpha = 0.5 + Math.random() * 0.4;
+        g._speed = 0.3 + Math.random() * 0.5;
+        app.stage.addChild(g);
+        particles.push(g);
+      }
+
+      var rocket = new PIXI.Text({ text: '🚀', style: { fontSize: 42 } });
+      rocket.anchor.set(0.5);
+      rocket.x = centerX;
+      rocket.y = centerY;
+      app.stage.addChild(rocket);
+
+      var caption = new PIXI.Text({
+        text: LOADING_MESSAGES[0],
+        style: { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: 14, fill: 0x555555 },
+      });
+      caption.anchor.set(0.5, 0);
+      caption.x = centerX;
+      caption.y = CARD_HEIGHT - 46;
+      app.stage.addChild(caption);
+
+      // Message rotation runs on a plain interval, decoupled from the
+      // ticker — no need to tie caption changes to frame timing.
+      var msgIndex = 0;
+      app._loadingMsgTimer = setInterval(function () {
+        msgIndex = (msgIndex + 1) % LOADING_MESSAGES.length;
+        caption.text = LOADING_MESSAGES[msgIndex];
+      }, 3500);
+
+      app.ticker.add(function () {
+        var t = performance.now() / 1000;
+        rocket.y = centerY + Math.sin(t * 1.6) * 8;
+        rocket.rotation = Math.sin(t * 1.1) * 0.08;
+
+        particles.forEach(function (p) {
+          p.y -= p._speed;
+          if (p.y < -20) {
+            p.y = CARD_HEIGHT + 10;
+            p.x = 20 + Math.random() * (CARD_WIDTH - 40);
+          }
+        });
+      });
+    });
+  }
+
+  // Stops the interval and destroys the Pixi application so its ticker
+  // doesn't keep running in the background once the real card takes over.
+  function hideLoadingAnimation() {
+    if (!loadingApp) return;
+    if (loadingApp._loadingMsgTimer) clearInterval(loadingApp._loadingMsgTimer);
+    loadingApp.destroy(true, { children: true });
+    loadingApp = null;
   }
 
   function setStatus(msg, isError) {
