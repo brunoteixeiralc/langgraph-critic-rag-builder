@@ -230,9 +230,14 @@ function serializeGraphResult(
     hashtags: result.hashtags ?? [],
     codeSnippets: result.codeSnippets ?? [],
     // Fetch each rendered PNG separately — see file header for why.
-    codeImages: images.map((img) => ({
+    // Mapped from result.codeImages directly (not the `images` array above)
+    // so `source` (which renderer produced it — see imageExtractorNode.ts)
+    // comes along; `images`/StoredImage only needs the bytes for the
+    // /images/:filename route, not this field.
+    codeImages: (result.codeImages ?? []).map((img) => ({
       filename: img.filename,
       url: `/result/${jobId}/images/${encodeURIComponent(img.filename)}`,
+      source: img.source,
     })),
     reviewCount: result.reviewCount,
     reviewFeedback: result.reviewFeedback || null,

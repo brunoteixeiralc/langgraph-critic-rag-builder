@@ -136,7 +136,11 @@ Valid niche names: "ios", "node_react", "ai_engineering".`;
     // Populated below alongside the on-disk PNGs. Kept in state so callers
     // that can't rely on the container's filesystem persisting (e.g. the
     // HTTP wrapper in src/server.ts) can still get the rendered images back.
-    const codeImages: { index: number; filename: string; base64: string }[] = [];
+    // `source` tracks which renderer actually produced each image (Carbonara
+    // vs the Shiki fallback below) — surfaced as a small badge on the
+    // preview page so it's visible at a glance instead of needing to dig
+    // through Railway logs to answer "which one rendered this?".
+    const codeImages: { index: number; filename: string; base64: string; source: 'carbonara' | 'shiki' }[] = [];
 
     // Carbonara doesn't just serve a pre-rendered image — per its own repo
     // (petersolopov/carbonara), it launches a headless Chromium via
@@ -245,7 +249,7 @@ Valid niche names: "ios", "node_react", "ai_engineering".`;
     async function renderSnippet(
       index: number,
       rawSnippet: string,
-    ): Promise<{ index: number; filename: string; base64: string } | null> {
+    ): Promise<{ index: number; filename: string; base64: string; source: 'carbonara' | 'shiki' } | null> {
       // Remove prefixes like [CODE_SNIPPET_1] or [CODE_SNIPPET_1]: that the LLM may incorrectly prepend
       let codeContent = rawSnippet.replace(/^\[CODE_SNIPPET_\d+\]:?\s*/i, '');
       // Unescape literal \n sequences that appear when the model serializes code as a JSON string
@@ -263,8 +267,10 @@ Valid niche names: "ios", "node_react", "ai_engineering".`;
       }
 
       let pngBuffer = await fetchCarbonaraImage(index, codeContent);
+      let source: 'carbonara' | 'shiki' = 'carbonara';
       if (!pngBuffer) {
         console.warn(`[-] Snippet ${index + 1}: all ${CARBONARA_MAX_ATTEMPTS} Carbonara attempts failed — falling back to local Shiki rendering.`);
+        source = 'shiki';
         pngBuffer = await renderShikiFallback(codeContent, ext);
         if (pngBuffer) {
           console.log(`[+] Snippet ${index + 1}: rendered via Shiki fallback (${pngBuffer.length} bytes).`);
@@ -278,7 +284,7 @@ Valid niche names: "ios", "node_react", "ai_engineering".`;
       const imgPath = path.join(outputDir, filename);
       await fs.writeFile(imgPath, pngBuffer);
       console.log(`[+] Code image saved: ${imgPath}`);
-      return { index: index + 1, filename, base64: pngBuffer.toString('base64') };
+      return { index: index + 1, filename, base64: pngBuffer.toString('base64'), source };
     }
 
     if (state.codeSnippets && state.codeSnippets.length > 0) {

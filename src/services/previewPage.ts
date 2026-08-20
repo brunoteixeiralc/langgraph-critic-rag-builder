@@ -162,6 +162,7 @@ export function renderPreviewPage(jobId: string): string {
     <div id="actions">
       <button id="copyTextBtn" type="button">📋 Copiar texto p/ LinkedIn</button>
       <button id="downloadImagesBtn" type="button">⬇️ Baixar imagens</button>
+      <button id="skipAnimBtn" type="button">⏭️ Pular animação</button>
     </div>
   </div>
 
@@ -178,11 +179,17 @@ export function renderPreviewPage(jobId: string): string {
   var actionsEl = document.getElementById('actions');
   var copyTextBtn = document.getElementById('copyTextBtn');
   var downloadImagesBtn = document.getElementById('downloadImagesBtn');
+  var skipAnimBtn = document.getElementById('skipAnimBtn');
   var pollTimer = null;
   // Cached from the last successful handleResult() so the button handlers
   // below don't need to re-fetch /result/:jobId — the data's already here.
   var lastData = null;
   var lastKey = null;
+  // Checked at the start of every animation step in typewriteText/fadeIn/
+  // popIn below — flipping it makes whichever step is in flight jump
+  // straight to its end state instead of waiting out its normal duration.
+  // Reset to false at the start of every buildPixiCard() call (new job load).
+  var skipAnimation = false;
 
   loadBtn.addEventListener('click', function () { startPolling(); });
   apiKeyInput.addEventListener('keydown', function (e) {
@@ -190,6 +197,7 @@ export function renderPreviewPage(jobId: string): string {
   });
   copyTextBtn.addEventListener('click', function () { copyPostText(); });
   downloadImagesBtn.addEventListener('click', function () { downloadAllImages(); });
+  skipAnimBtn.addEventListener('click', function () { skipAnimation = true; });
 
   function startPolling() {
     var key = apiKeyInput.value.trim();
@@ -449,7 +457,7 @@ export function renderPreviewPage(jobId: string): string {
         // add, and turns "images didn't show up" reports into an actual
         // reason (404 on the image route, decode error, etc) on the next test.
         reportImageIssues(segments, imagesByIndex);
-        return buildPixiCard(segments, data.hashtags || []);
+        return buildPixiCard(segments, data.hashtags || [], data.niche);
       })
       .catch(function (err) { setStatus('Erro montando o preview: ' + err.message, true); });
   }
@@ -517,6 +525,7 @@ export function renderPreviewPage(jobId: string): string {
       .map(function (seg) {
         var img = imagesByIndex[seg.index];
         if (!img) { seg.skip = true; return Promise.resolve(); }
+        seg.source = img.source; // 'carbonara' | 'shiki' — read by the badge in buildPixiCard below
         return fetch(img.url, { headers: { 'x-api-key': key } })
           .then(function (res) {
             if (!res.ok) throw new Error('Falha ao buscar imagem ' + img.filename);
@@ -545,8 +554,23 @@ export function renderPreviewPage(jobId: string): string {
   // headline length in the feed, none of which this preview can know.
   var LINKEDIN_TRUNCATE_CHARS = 210;
 
-  function buildPixiCard(segments, hashtags) {
+  // Generic per-niche headline shown under the fake name in the profile
+  // header — not a claim about who actually wrote the post (this tool has
+  // no concept of "author"), just enough real-feed texture to make the
+  // mockup read as an actual LinkedIn post instead of a bare text+image card.
+  var NICHE_HEADLINES = {
+    ios: 'iOS Developer',
+    node_react: 'Full Stack Developer',
+    ai_engineering: 'AI Engineer',
+  };
+
+  function buildPixiCard(segments, hashtags, niche) {
     canvasContainer.innerHTML = '';
+    // A fresh render (new job, or a reload of the same one) should always
+    // start with the reveal animation intact — without this, clicking
+    // "pular animação" on one job would silently skip the animation on
+    // every job loaded afterward too.
+    skipAnimation = false;
     var CARD_WIDTH = 640;
     var PADDING = 24;
     var contentWidth = CARD_WIDTH - PADDING * 2;
@@ -563,6 +587,16 @@ export function renderPreviewPage(jobId: string): string {
       canvasContainer.appendChild(app.canvas);
 
       var y = PADDING;
+
+      // --- Fake LinkedIn header: avatar, name, headline, connection degree,
+      // timestamp — always fully visible immediately (real post chrome
+      // doesn't "type itself in"), only the generated content below animates.
+      var profileHeader = buildProfileHeader(niche, contentWidth);
+      profileHeader.x = PADDING;
+      profileHeader.y = y;
+      app.stage.addChild(profileHeader);
+      y += profileHeader._h + 14;
+
       var textStyle = {
         fontFamily: 'Arial, Helvetica, sans-serif',
         fontSize: 15,
@@ -610,11 +644,24 @@ export function renderPreviewPage(jobId: string): string {
           var scale = Math.min(1, contentWidth / seg.texture.width);
           sprite.width = seg.texture.width * scale;
           sprite.height = seg.texture.height * scale;
-          sprite.x = PADDING;
-          sprite.y = y;
-          app.stage.addChild(sprite);
+
+          // Sprite + engine badge grouped into one container so they fade in
+          // together as a unit (badge alone in revealQueue would animate as
+          // its own separate step, one beat after the image — clunkier than
+          // just moving with it).
+          var imageGroup = new PIXI.Container();
+          imageGroup.addChild(sprite);
+          if (seg.source) {
+            var badge = buildEngineBadge(seg.source);
+            badge.x = sprite.width - badge._w - 8;
+            badge.y = 8;
+            imageGroup.addChild(badge);
+          }
+          imageGroup.x = PADDING;
+          imageGroup.y = y;
+          app.stage.addChild(imageGroup);
           y += sprite.height + 16;
-          revealQueue.push({ kind: 'image', obj: sprite });
+          revealQueue.push({ kind: 'image', obj: imageGroup });
         }
       });
 
@@ -635,6 +682,14 @@ export function renderPreviewPage(jobId: string): string {
         truncateMarker = buildTruncateMarker(PADDING, PADDING + contentWidth, truncateY);
         app.stage.addChild(truncateMarker);
       }
+
+      // --- Fake action bar (Like/Comment/Repost/Send) — same as the header,
+      // always fully visible immediately, no reveal animation.
+      y += 10;
+      var actionBar = buildActionBar(contentWidth, y);
+      actionBar.x = PADDING;
+      app.stage.addChild(actionBar);
+      y += actionBar._h;
 
       y += PADDING;
       app.renderer.resize(CARD_WIDTH, Math.max(200, y));
@@ -658,6 +713,116 @@ export function renderPreviewPage(jobId: string): string {
         if (truncateMarker) fadeIn(truncateMarker, function () {});
       });
     });
+  }
+
+  // Fake LinkedIn post header: avatar circle with initials, name, a
+  // niche-derived headline, connection degree, and a fake timestamp. Purely
+  // cosmetic chrome — this tool has no real "author" concept, the goal is
+  // just to make the card read as an actual feed post instead of a bare
+  // text+image rectangle.
+  function buildProfileHeader(niche, width) {
+    var container = new PIXI.Container();
+    var AVATAR_SIZE = 48;
+
+    var avatarBg = new PIXI.Graphics();
+    avatarBg.circle(AVATAR_SIZE / 2, AVATAR_SIZE / 2, AVATAR_SIZE / 2).fill({ color: 0x0a66c2 });
+    container.addChild(avatarBg);
+
+    var initials = new PIXI.Text({
+      text: 'VC',
+      style: { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: 16, fontWeight: 'bold', fill: 0xffffff },
+    });
+    initials.anchor.set(0.5);
+    initials.x = AVATAR_SIZE / 2;
+    initials.y = AVATAR_SIZE / 2;
+    container.addChild(initials);
+
+    var textX = AVATAR_SIZE + 12;
+
+    var nameText = new PIXI.Text({
+      text: 'Seu Nome',
+      style: { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: 14, fontWeight: 'bold', fill: 0x1a1a1a },
+    });
+    nameText.x = textX;
+    nameText.y = 0;
+    container.addChild(nameText);
+
+    var headline = (NICHE_HEADLINES[niche] || 'Software Developer') + ' • 1º';
+    var headlineText = new PIXI.Text({
+      text: headline,
+      style: { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: 12, fill: 0x666666 },
+    });
+    headlineText.x = textX;
+    headlineText.y = 18;
+    container.addChild(headlineText);
+
+    var timeText = new PIXI.Text({
+      text: '2h • 🌐',
+      style: { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: 12, fill: 0x666666 },
+    });
+    timeText.x = textX;
+    timeText.y = 34;
+    container.addChild(timeText);
+
+    container._h = AVATAR_SIZE;
+    return container;
+  }
+
+  // Fake action bar (Like/Comment/Repost/Send) below the hashtags — same
+  // rationale as buildProfileHeader: real feed chrome, not generated
+  // content, so it's not part of the reveal animation either.
+  function buildActionBar(width, yPos) {
+    var container = new PIXI.Container();
+
+    var divider = new PIXI.Graphics();
+    divider.moveTo(0, 0).lineTo(width, 0).stroke({ width: 1, color: 0xe0dfdc });
+    container.addChild(divider);
+
+    var actions = ['👍 Gostei', '💬 Comentar', '🔁 Compartilhar', '✉️ Enviar'];
+    var slotWidth = width / actions.length;
+    actions.forEach(function (label, i) {
+      var t = new PIXI.Text({
+        text: label,
+        style: { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: 12, fill: 0x666666 },
+      });
+      t.x = i * slotWidth + Math.max(0, (slotWidth - t.width) / 2);
+      t.y = 14;
+      container.addChild(t);
+    });
+
+    container.y = yPos;
+    container._h = 44;
+    return container;
+  }
+
+  // Small pill badge on a code-snippet image showing which renderer
+  // actually produced it — Carbonara (the primary path, carbon.now.sh via
+  // headless Chromium) or the local Shiki fallback (see
+  // imageExtractorNode.ts). Answers "which one rendered this?" directly on
+  // the card instead of needing to dig through Railway logs for it.
+  function buildEngineBadge(source) {
+    var isCarbonara = source === 'carbonara';
+    var label = isCarbonara ? 'Carbonara' : 'Shiki (fallback)';
+    var color = isCarbonara ? 0x0a66c2 : 0x7c3aed;
+    var container = new PIXI.Container();
+
+    var text = new PIXI.Text({
+      text: label,
+      style: { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: 10, fontWeight: 'bold', fill: 0xffffff },
+    });
+    text.x = 6;
+    text.y = 3;
+
+    var w = text.width + 12;
+    var h = text.height + 6;
+    var bg = new PIXI.Graphics();
+    bg.roundRect(0, 0, w, h, h / 2).fill({ color: color, alpha: 0.9 });
+
+    container.addChild(bg);
+    container.addChild(text);
+    container._w = w;
+    container._h = h;
+    return container;
   }
 
   // Draws a dashed guide line + label at the vertical point where LinkedIn's
@@ -725,10 +890,11 @@ export function renderPreviewPage(jobId: string): string {
   // ~13s at 60fps, which drags).
   function typewriteText(textObj, fullText, onDone) {
     var len = fullText.length;
-    if (len === 0) { onDone(); return; }
+    if (len === 0 || skipAnimation) { textObj.text = fullText; onDone(); return; }
     var charsPerFrame = Math.max(1, Math.ceil(len / 60));
     var shown = 0;
     function step() {
+      if (skipAnimation) { textObj.text = fullText; onDone(); return; }
       shown = Math.min(len, shown + charsPerFrame);
       textObj.text = fullText.slice(0, shown);
       if (shown < len) { requestAnimationFrame(step); } else { onDone(); }
@@ -737,9 +903,11 @@ export function renderPreviewPage(jobId: string): string {
   }
 
   function fadeIn(displayObject, onDone) {
+    if (skipAnimation) { displayObject.alpha = 1; onDone(); return; }
     var duration = 300;
     var start = null;
     function step(ts) {
+      if (skipAnimation) { displayObject.alpha = 1; onDone(); return; }
       if (start === null) start = ts;
       var t = Math.min(1, (ts - start) / duration);
       displayObject.alpha = t;
@@ -749,9 +917,11 @@ export function renderPreviewPage(jobId: string): string {
   }
 
   function popIn(displayObject) {
+    if (skipAnimation) { displayObject.alpha = 1; displayObject.scale.set(1); return; }
     var duration = 250;
     var start = null;
     function step(ts) {
+      if (skipAnimation) { displayObject.alpha = 1; displayObject.scale.set(1); return; }
       if (start === null) start = ts;
       var t = Math.min(1, (ts - start) / duration);
       displayObject.alpha = t;

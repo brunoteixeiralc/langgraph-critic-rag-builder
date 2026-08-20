@@ -38,6 +38,9 @@ export const PostStateAnnotation = z.object({
     index: z.number(),
     filename: z.string(),
     base64: z.string(),
+    // Which renderer actually produced this image — surfaced on the
+    // preview page as a small badge. See imageExtractorNode.ts.
+    source: z.enum(['carbonara', 'shiki']),
   })).optional(),
 });
 
