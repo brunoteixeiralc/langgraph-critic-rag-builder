@@ -253,11 +253,23 @@ export function renderPreviewPage(jobId: string): string {
   function getPlainPostText(data) {
     var text = data.finalPostText || data.unapprovedDraft || '';
     text = text.replace(/\\[(?:IMAGE_CODE|CODE_SNIPPET)_\\d+\\]/g, '');
+    // LinkedIn's post composer doesn't render Markdown — "**bold**" just
+    // shows up as literal asterisks in a real post now. Strip them for the
+    // clipboard copy only; the canvas preview above is unaffected (it's
+    // showing layout, not what actually gets typed into LinkedIn).
+    text = text.replace(/\\*\\*/g, '');
     // A removed placeholder that sat on its own line leaves 3+ consecutive
     // newlines behind — collapse back down to a normal paragraph break.
     text = text.replace(/\\n{3,}/g, '\\n\\n').trim();
     if (data.hashtags && data.hashtags.length > 0) {
-      text += '\\n\\n' + data.hashtags.join(' ');
+      // The Reviewer's hashtags field doesn't always include the leading
+      // "#" (seen in production: ["SwiftTesting","iOSDev",...]) — normalize
+      // so every copied tag is a real, clickable LinkedIn hashtag.
+      var tags = data.hashtags.map(function (tag) {
+        tag = String(tag).trim();
+        return tag.charAt(0) === '#' ? tag : '#' + tag;
+      });
+      text += '\\n\\n' + tags.join(' ');
     }
     return text;
   }
