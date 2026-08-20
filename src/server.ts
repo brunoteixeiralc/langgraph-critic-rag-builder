@@ -336,6 +336,28 @@ const MOCK_SNIPPETS: Record<MockNiche, string[]> = {
   ],
 };
 
+// Mirrors the ACTUAL shape a real approved post comes out in — not just
+// "some text, some code" — specifically the two things that only surface as
+// bugs once real content hits them: "**bold**" Markdown (the specialist
+// writes it, LinkedIn's composer doesn't render it — see the copy-button
+// fix) and hashtags with no leading "#" (a real quirk of the Reviewer's
+// output, seen in production: ["SwiftTesting","iOSDev",...]). A mock with
+// clean single-line text and pre-hashed tags would never have caught either
+// bug — this only earns its keep as a test fixture if it's as messy as the
+// real thing.
+const MOCK_POST_TEXT: Record<MockNiche, string> = {
+  ios: 'Swift Testing replaced XCTest as the default in Xcode — and it changes more than just the assertion syntax.\n\n**Less boilerplate, more expressiveness**\n\nInstead of dozens of assertion methods, a single #expect macro generates a detailed failure message automatically.\n\n[IMAGE_CODE_1]\n\n**Errors as first-class citizens**\n\nThrowing from inside a test is the expected pattern for validating failure paths now, not an edge case to work around.\n\n[IMAGE_CODE_2]\n\nHave you migrated an existing XCTest suite yet, or are you starting fresh with Swift Testing on a new project?',
+  node_react: "Most React performance complaints trace back to one thing: components re-rendering for no real reason.\n\n**Referential equality is the usual culprit**\n\nPassing an inline object or array as a prop creates a new reference every render, even when the values inside are identical.\n\n[IMAGE_CODE_1]\n\n**useState alone won't fix it**\n\nThe component needs to actually skip work when props haven't meaningfully changed, not just avoid re-creating state.\n\n[IMAGE_CODE_2]\n\nDo you reach for useMemo/useCallback by default, or only after profiling shows a real re-render problem?",
+  ai_engineering: "Most \"slow\" RAG pipelines aren't slow because of the vector search — they're slow because of what happens before it.\n\n**Batching embeddings changes everything**\n\nCalling the embedding API once per document instead of once per batch multiplies your latency by the document count.\n\n[IMAGE_CODE_1]\n\n**Normalization matters for cosine similarity**\n\nSkipping it doesn't break retrieval outright, but it silently degrades ranking quality in ways that are hard to notice.\n\n[IMAGE_CODE_2]\n\nAre you batching embedding calls in your pipeline, or still doing it one document at a time?",
+};
+
+const MOCK_HASHTAGS: Record<MockNiche, string[]> = {
+  // No leading "#" on purpose — see MOCK_POST_TEXT's comment above.
+  ios: ['SwiftTesting', 'iOSDev', 'SwiftLang'],
+  node_react: ['ReactJS', 'JavaScript', 'WebDev'],
+  ai_engineering: ['AIEngineering', 'RAG', 'MachineLearning'],
+};
+
 app.post('/generate-mock', requireApiKey, (req: Request, res: Response) => {
   const requestedNiche = typeof req.body?.niche === 'string' ? req.body.niche : 'ios';
   const niche: MockNiche = (MOCK_NICHES as readonly string[]).includes(requestedNiche)
@@ -359,12 +381,12 @@ app.post('/generate-mock', requireApiKey, (req: Request, res: Response) => {
     try {
       const codeSnippets = MOCK_SNIPPETS[niche];
       const mockState: GraphState = {
-        initialCommand: `[MOCK] Testing image generation for niche=${niche}`,
+        initialCommand: `[MOCK] Testing full pipeline for niche=${niche}`,
         niche,
         suggestedFolderSlug: 'mock-image-test',
         codeSnippets,
-        finalPostText: `Testing image rendering for ${niche}.\n\n[IMAGE_CODE_1]\n\nSecond snippet:\n\n[IMAGE_CODE_2]`,
-        hashtags: ['#MockTest'],
+        finalPostText: MOCK_POST_TEXT[niche],
+        hashtags: MOCK_HASHTAGS[niche],
         reviewCount: 0,
       };
 
