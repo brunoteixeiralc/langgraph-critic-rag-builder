@@ -536,6 +536,15 @@ export function renderPreviewPage(jobId: string): string {
     return Promise.all(jobs);
   }
 
+  // No official number is published for where LinkedIn's feed clips a post
+  // behind "...ver mais" — this is the figure most commonly cited by
+  // LinkedIn growth/SSI tooling and roughly matches the "max 2-3 lines per
+  // paragraph" rule the specialist prompts already write toward. Treat the
+  // guide line drawn from this as an estimate, not a guarantee: the real
+  // cutoff also depends on font, viewport width, and the poster's name/
+  // headline length in the feed, none of which this preview can know.
+  var LINKEDIN_TRUNCATE_CHARS = 210;
+
   function buildPixiCard(segments, hashtags) {
     canvasContainer.innerHTML = '';
     var CARD_WIDTH = 640;
@@ -567,6 +576,8 @@ export function renderPreviewPage(jobId: string): string {
       // every position/size is correct — this is what decides the card's
       // final height. Nothing is hidden yet.
       var revealQueue = [];
+      var charsSoFar = 0; // running count of visible body-text characters, for the LinkedIn-cutoff marker below
+      var truncateY = null;
       segments.forEach(function (seg) {
         if (seg.type === 'text') {
           var content = seg.content.replace(/^\\n+|\\n+$/g, '');
@@ -575,6 +586,23 @@ export function renderPreviewPage(jobId: string): string {
           t.x = PADDING;
           t.y = y;
           app.stage.addChild(t);
+
+          // The threshold falls inside THIS paragraph — approximate where,
+          // vertically, by assuming characters are spread evenly across the
+          // lines PixiJS wrapped this paragraph into (t.height / lineHeight
+          // lines). Not pixel-exact (real line breaks land on word
+          // boundaries, not a fixed char count), but close enough to be a
+          // useful guide, and avoids depending on PixiJS's internal
+          // (undocumented, version-fragile) per-line text metrics.
+          if (truncateY === null && charsSoFar + content.length >= LINKEDIN_TRUNCATE_CHARS) {
+            var localOffset = LINKEDIN_TRUNCATE_CHARS - charsSoFar;
+            var numLines = Math.max(1, Math.round(t.height / textStyle.lineHeight));
+            var charsPerLine = Math.max(1, content.length / numLines);
+            var lineIndex = Math.min(numLines - 1, Math.floor(localOffset / charsPerLine));
+            truncateY = t.y + (lineIndex + 1) * textStyle.lineHeight;
+          }
+          charsSoFar += content.length;
+
           y += t.height + 12;
           revealQueue.push({ kind: 'text', obj: t, fullText: content });
         } else if (seg.type === 'image' && seg.texture && !seg.skip) {
@@ -599,6 +627,15 @@ export function renderPreviewPage(jobId: string): string {
         y += hashtagContainer._contentHeight;
       }
 
+      // Only draw the cutoff marker if the post is actually long enough to
+      // hit it — a short post that never reaches LINKEDIN_TRUNCATE_CHARS
+      // never gets clipped in the real feed, so there's nothing to flag.
+      var truncateMarker = null;
+      if (truncateY !== null) {
+        truncateMarker = buildTruncateMarker(PADDING, PADDING + contentWidth, truncateY);
+        app.stage.addChild(truncateMarker);
+      }
+
       y += PADDING;
       app.renderer.resize(CARD_WIDTH, Math.max(200, y));
 
@@ -611,11 +648,64 @@ export function renderPreviewPage(jobId: string): string {
         else { item.obj.alpha = 0; }
       });
       if (hashtagContainer) { hashtagContainer.alpha = 0; hashtagContainer.scale.set(0.95); }
+      // The cutoff line is an annotation ABOUT the post, not part of it —
+      // revealed last, after the reader has already "read" the whole card,
+      // instead of competing with the typewriter/fade-in for attention.
+      if (truncateMarker) { truncateMarker.alpha = 0; }
 
       revealSequentially(revealQueue, 0, function () {
         if (hashtagContainer) popIn(hashtagContainer);
+        if (truncateMarker) fadeIn(truncateMarker, function () {});
       });
     });
+  }
+
+  // Draws a dashed guide line + label at the vertical point where LinkedIn's
+  // feed would clip the post behind "...ver mais" (see LINKEDIN_TRUNCATE_CHARS
+  // above for the caveats on how approximate this is). A handful of short
+  // moveTo/lineTo segments before a single stroke() call is the standard way
+  // to fake a dashed line in PixiJS v8 — there's no native dash support, but
+  // this is well within the segment count where that approach is fine (the
+  // library only struggles at very high segment counts, not the ~60 a single
+  // card-width line needs here).
+  function buildTruncateMarker(x0, x1, yPos) {
+    var container = new PIXI.Container();
+    var color = 0xd97706;
+
+    var line = new PIXI.Graphics();
+    var dash = 6, gap = 4, x = x0;
+    while (x < x1) {
+      var segEnd = Math.min(x1, x + dash);
+      line.moveTo(x, yPos).lineTo(segEnd, yPos);
+      x = segEnd + gap;
+    }
+    line.stroke({ width: 1.5, color: color });
+    container.addChild(line);
+
+    var label = new PIXI.Text({
+      text: '✂️ corte do feed (~' + LINKEDIN_TRUNCATE_CHARS + ' car., estimativa) — "ver mais"',
+      style: {
+        fontFamily: 'Arial, Helvetica, sans-serif',
+        fontSize: 11,
+        fontStyle: 'italic',
+        fill: 0x7a4a03,
+      },
+    });
+    label.x = x0 + 4;
+    label.y = yPos + 4;
+
+    // The dashed line crosses right through live post text — the label
+    // needs its own solid backing to stay readable instead of blending into
+    // whatever paragraph it happens to land near.
+    var labelBg = new PIXI.Graphics();
+    labelBg
+      .roundRect(x0, yPos + 2, label.width + 8, label.height + 4, 4)
+      .fill({ color: 0xfff7e6, alpha: 0.95 });
+    labelBg.stroke({ width: 1, color: color, alpha: 0.6 });
+    container.addChild(labelBg);
+    container.addChild(label);
+
+    return container;
   }
 
   // Reveals revealQueue items one at a time, only starting the next once
