@@ -150,7 +150,6 @@ export function renderPreviewPage(jobId: string): string {
     <div id="actions">
       <button id="copyTextBtn" type="button">📋 Copiar texto p/ LinkedIn</button>
       <button id="downloadImagesBtn" type="button">⬇️ Baixar imagens</button>
-      <button id="skipAnimBtn" type="button">⏭️ Pular animação</button>
     </div>
   </div>
 
@@ -167,7 +166,6 @@ export function renderPreviewPage(jobId: string): string {
   var actionsEl = document.getElementById('actions');
   var copyTextBtn = document.getElementById('copyTextBtn');
   var downloadImagesBtn = document.getElementById('downloadImagesBtn');
-  var skipAnimBtn = document.getElementById('skipAnimBtn');
   var pollTimer = null;
   // Cached from the last successful handleResult() so the button handlers
   // below don't need to re-fetch /result/:jobId — the data's already here.
@@ -185,7 +183,6 @@ export function renderPreviewPage(jobId: string): string {
   });
   copyTextBtn.addEventListener('click', function () { copyPostText(); });
   downloadImagesBtn.addEventListener('click', function () { downloadAllImages(); });
-  skipAnimBtn.addEventListener('click', function () { skipAnimation = true; });
 
   function startPolling() {
     var key = apiKeyInput.value.trim();
@@ -774,6 +771,9 @@ export function renderPreviewPage(jobId: string): string {
       var galleryContainer = null;
       var loadedGalleryImages = galleryImages.filter(function (s) { return s.texture && !s.skip; });
       if (loadedGalleryImages.length > 0) {
+        // Breathing room so the gallery doesn't sit flush against the
+        // hashtags right above it.
+        y += 16;
         galleryContainer = buildImageGallery(loadedGalleryImages, contentWidth);
         galleryContainer.x = PADDING;
         galleryContainer.y = y;
