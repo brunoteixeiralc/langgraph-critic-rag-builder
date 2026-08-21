@@ -158,6 +158,10 @@ export function renderPreviewPage(jobId: string): string {
 <script>
 (function () {
   var jobId = ${JSON.stringify(jobId)};
+  // Same localStorage key homePage.ts saves the key under — lets a redirect
+  // from the "gerar post" form land here already authenticated instead of
+  // asking to paste the key a second time.
+  var STORAGE_KEY = 'lcrb_api_key';
   var apiKeyInput = document.getElementById('apiKey');
   var loadBtn = document.getElementById('loadBtn');
   var statusEl = document.getElementById('status');
@@ -184,9 +188,20 @@ export function renderPreviewPage(jobId: string): string {
   copyTextBtn.addEventListener('click', function () { copyPostText(); });
   downloadImagesBtn.addEventListener('click', function () { downloadAllImages(); });
 
+  // Prefill from the key homePage.ts's "gerar post" form already saved, and
+  // if it's there, skip the extra click and start loading right away — the
+  // common path is landing here straight off that form's redirect.
+  var savedKey = null;
+  try {
+    savedKey = localStorage.getItem(STORAGE_KEY);
+    if (savedKey) { apiKeyInput.value = savedKey; }
+  } catch (e) { /* localStorage unavailable — just skip prefill/auto-start */ }
+  if (savedKey) { startPolling(); }
+
   function startPolling() {
     var key = apiKeyInput.value.trim();
     if (!key) { setStatus('Cole sua x-api-key acima.', true); return; }
+    try { localStorage.setItem(STORAGE_KEY, key); } catch (e) { /* ignore */ }
     if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
     poll(key);
   }

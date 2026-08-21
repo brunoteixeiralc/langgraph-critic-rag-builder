@@ -41,6 +41,7 @@ import cors from 'cors';
 import { buildPostGraph } from './graph/graph.ts';
 import { OpenRouterService } from './services/openrouterService.ts';
 import { renderPreviewPage } from './services/previewPage.ts';
+import { renderHomePage } from './services/homePage.ts';
 import { createImageExtractorNode } from './graph/nodes/imageExtractorNode.ts';
 import type { GraphState } from './graph/graph.ts';
 
@@ -254,6 +255,20 @@ function serializeGraphResult(
 // Railway (and most PaaS) health checks hit this to know the service is up.
 app.get('/health', (_req: Request, res: Response) => {
   res.status(200).json({ ok: true });
+});
+
+// Small form replacing the manual "curl -X POST /generate" workflow — see
+// homePage.ts for the full rationale. Not behind requireApiKey for the same
+// reason /result/:jobId/preview isn't: the HTML itself holds no secrets, and
+// a browser navigating here can't attach a custom header anyway. The page's
+// own JS collects the key client-side and uses it for the real POST
+// /generate call below, which stays fully protected.
+app.get('/', (_req: Request, res: Response) => {
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self'; connect-src 'self';",
+  );
+  res.status(200).set('Content-Type', 'text/html; charset=utf-8').send(renderHomePage());
 });
 
 // A `topic` is meant to be a short prompt (optionally with a URL or two), not
