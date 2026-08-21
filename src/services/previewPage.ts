@@ -99,6 +99,19 @@ export function renderPreviewPage(jobId: string): string {
     cursor: pointer;
   }
   #actions button:hover { background: #f3f2ef; }
+  .actionLink {
+    display: inline-flex;
+    align-items: center;
+    padding: 8px 14px;
+    border: 1px solid #cfcfcf;
+    border-radius: 6px;
+    background: #fff;
+    color: #1a1a1a;
+    font-size: 13px;
+    text-decoration: none;
+    cursor: pointer;
+  }
+  .actionLink:hover { background: #f3f2ef; }
   #actions button:disabled { opacity: 0.5; cursor: not-allowed; }
   #headerInfo { margin-top: 10px; font-size: 13px; line-height: 1.6; }
   #headerInfo .topic { margin-bottom: 6px; }
@@ -150,6 +163,7 @@ export function renderPreviewPage(jobId: string): string {
     <div id="actions">
       <button id="copyTextBtn" type="button">📋 Copiar texto p/ LinkedIn</button>
       <button id="downloadImagesBtn" type="button">⬇️ Baixar imagens</button>
+      <a id="newPostLink" href="/" class="actionLink">🏠 Gerar novo post</a>
     </div>
   </div>
 

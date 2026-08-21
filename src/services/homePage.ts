@@ -444,8 +444,16 @@ export function renderHomePage(): string {
       bg.clear();
       var fillColor = selected ? 0xeef3f8 : 0xffffff;
       var strokeColor = selected ? 0x0a66c2 : 0xd8dade;
+      // Fresh roundRect() call before EACH style op (fill, then stroke) —
+      // a real bug hit in production: reusing the path from .fill() for a
+      // separate, later .stroke() call threw "Cannot read properties of
+      // undefined (reading 'push')" inside pixi.min.js the moment a card
+      // was clicked (fill() appears to consume/reset the pending path, so
+      // a trailing stroke() with nothing pending blows up internally).
+      // Redrawing the same shape once per style call sidesteps that
+      // entirely instead of relying on undocumented path-reuse behavior.
       bg.roundRect(1, 1, w - 2, h - 2, 10).fill({ color: fillColor });
-      bg.stroke({ width: selected ? 2 : 1, color: strokeColor });
+      bg.roundRect(1, 1, w - 2, h - 2, 10).stroke({ width: selected ? 2 : 1, color: strokeColor });
       label.style.fill = selected ? 0x0a66c2 : 0x1a1a1a;
       container.scale.set(hover && !selected ? 1.03 : 1);
     }
