@@ -66,7 +66,17 @@ const graph = buildPostGraph(llmClient);
 // the job report an error after GRAPH_TIMEOUT_MS, but doesn't cancel
 // in-flight requests inside the graph (no AbortSignal threaded through
 // LangGraph nodes) — it just stops us from waiting on them forever.
-const GRAPH_TIMEOUT_MS = 10 * 60 * 1000; // 10 min — well above the typical 1-3 min run (review retries + image rendering)
+//
+// Was 10 min, which turned out to be a REAL false-positive, not just a
+// theoretical risk: a production run with review retries + several Carbonara
+// snippets hit this race at 600s and got reported as an error, while
+// LangSmith shows the exact same graph run kept going in the background and
+// actually finished successfully at ~909s — the job store had already
+// marked it 'error' by then, so that successful result was silently thrown
+// away (and its OpenRouter/Carbonara cost wasted for nothing). 18 min gives
+// real runs like that comfortable headroom while still bounding a genuinely
+// hung call.
+const GRAPH_TIMEOUT_MS = 18 * 60 * 1000; // 18 min — a real successful run has been observed taking ~15min (review retries + image rendering)
 
 function invokeGraphWithTimeout(input: { initialCommand: string; reviewCount: number }) {
   return Promise.race([
