@@ -1,9 +1,16 @@
 /**
  * Serves a single self-contained HTML page (see server.ts's
  * `GET /result/:jobId/preview`) that renders a generated post the way it
- * would actually look on LinkedIn: final text with the [IMAGE_CODE_N]
- * placeholders swapped for the real rendered code-snippet images, and
- * hashtags below — instead of reading raw JSON.
+ * would actually look on LinkedIn. IMPORTANT: LinkedIn's real composer does
+ * NOT support images placed inline between paragraphs — attached images
+ * always render as a single gallery block (a swipeable multi-image carousel,
+ * up to 9 images) below the ENTIRE text, never interleaved at specific
+ * points. So each [IMAGE_CODE_N]/[CODE_SNIPPET_N] placeholder in the text
+ * renders as a small inline "chip" (just a text cue marking "code discussed
+ * here"), and the real rendered code-snippet images are grouped into one
+ * gallery section after the text/hashtags — see buildInlineChip() and
+ * buildImageGallery() below. Hashtags render below the text, same as a real
+ * post — instead of reading raw JSON.
  *
  * The post itself is drawn with PixiJS onto a <canvas> (per explicit choice
  * over plain HTML/CSS). Everything else on the page — the API key field,
@@ -232,23 +239,36 @@ export function renderPreviewPage(jobId: string): string {
     renderCard(data, key);
   }
 
-  // Strips the [IMAGE_CODE_N]/[CODE_SNIPPET_N] placeholders and appends the
-  // hashtags — this is what you actually want on the clipboard for pasting
-  // into LinkedIn's post composer, where images get attached separately via
-  // its own upload UI, not inline in the text. The canvas above renders the
-  // placeholder version (with real images swapped in) for previewing the
-  // finished layout; this is the "ready to paste" version.
+  // Turns [IMAGE_CODE_N]/[CODE_SNIPPET_N] into a short inline cue and
+  // appends the hashtags — this is what you actually want on the clipboard
+  // for pasting into LinkedIn's post composer, where images get attached
+  // separately as a single gallery upload, never inline in the text. Used
+  // to just delete the placeholders outright, which left the copied text
+  // with zero mention that there's code to attach at all. The canvas above
+  // renders the same "chip + gallery" model for previewing the layout; this
+  // is the "ready to paste" plain-text version.
   function getPlainPostText(data) {
     var text = data.finalPostText || data.unapprovedDraft || '';
-    text = text.replace(/\\[(?:IMAGE_CODE|CODE_SNIPPET)_\\d+\\]/g, '');
+    var hasImages = !!(data.codeImages && data.codeImages.length > 0);
+    text = text.replace(/\\[(?:IMAGE_CODE|CODE_SNIPPET)_(\\d+)\\]/g, function (_m, n) {
+      return '(exemplo ' + n + ' 👇)';
+    });
     // LinkedIn's post composer doesn't render Markdown — "**bold**" just
     // shows up as literal asterisks in a real post now. Strip them for the
     // clipboard copy only; the canvas preview above is unaffected (it's
     // showing layout, not what actually gets typed into LinkedIn).
     text = text.replace(/\\*\\*/g, '');
-    // A removed placeholder that sat on its own line leaves 3+ consecutive
-    // newlines behind — collapse back down to a normal paragraph break.
+    // A collapsed placeholder that sat on its own line can leave 3+
+    // consecutive newlines behind — collapse back down to a normal
+    // paragraph break.
     text = text.replace(/\\n{3,}/g, '\\n\\n').trim();
+    // LinkedIn can't show the images at the "(exemplo N)" cues above — they
+    // only attach as one gallery block. Spell that out once so whoever
+    // pastes this remembers to actually upload the images (via "Baixar
+    // imagens") in the same numbered order.
+    if (hasImages) {
+      text += '\\n\\n📎 Imagens dos exemplos de codigo anexadas a este post, na mesma ordem numerada acima.';
+    }
     if (data.hashtags && data.hashtags.length > 0) {
       // The Reviewer's hashtags field doesn't always include the leading
       // "#" (seen in production: ["SwiftTesting","iOSDev",...]) — normalize
@@ -686,6 +706,12 @@ export function renderPreviewPage(jobId: string): string {
       var revealQueue = [];
       var charsSoFar = 0; // running count of visible body-text characters, for the LinkedIn-cutoff marker below
       var truncateY = null;
+      // Every image segment gets pushed here regardless of whether its
+      // texture actually loaded — filtered down to the successful ones right
+      // before buildImageGallery() below. Order matches the order the
+      // placeholders appear in the text, same as LinkedIn preserves upload
+      // order in a real gallery.
+      var galleryImages = [];
       segments.forEach(function (seg) {
         if (seg.type === 'text') {
           var content = seg.content.replace(/^\\n+|\\n+$/g, '');
@@ -713,29 +739,20 @@ export function renderPreviewPage(jobId: string): string {
 
           y += t.height + 12;
           revealQueue.push({ kind: 'text', obj: t, fullText: content });
-        } else if (seg.type === 'image' && seg.texture && !seg.skip) {
-          var sprite = new PIXI.Sprite(seg.texture);
-          var scale = Math.min(1, contentWidth / seg.texture.width);
-          sprite.width = seg.texture.width * scale;
-          sprite.height = seg.texture.height * scale;
-
-          // Sprite + engine badge grouped into one container so they fade in
-          // together as a unit (badge alone in revealQueue would animate as
-          // its own separate step, one beat after the image — clunkier than
-          // just moving with it).
-          var imageGroup = new PIXI.Container();
-          imageGroup.addChild(sprite);
-          if (seg.source) {
-            var badge = buildEngineBadge(seg.source);
-            badge.x = sprite.width - badge._w - 8;
-            badge.y = 8;
-            imageGroup.addChild(badge);
-          }
-          imageGroup.x = PADDING;
-          imageGroup.y = y;
-          app.stage.addChild(imageGroup);
-          y += sprite.height + 16;
-          revealQueue.push({ kind: 'image', obj: imageGroup });
+        } else if (seg.type === 'image') {
+          // LinkedIn has no inline-image support in the real composer — the
+          // actual picture only ever shows up as one attached gallery block
+          // below the whole text (see buildImageGallery below). Inline, all
+          // an honest placeholder can become is a small text cue marking
+          // "there's a code example discussed here", not the picture itself.
+          galleryImages.push(seg);
+          var available = !!(seg.texture && !seg.skip);
+          var chip = buildInlineChip(seg.index, available);
+          chip.x = PADDING;
+          chip.y = y;
+          app.stage.addChild(chip);
+          y += chip._h + 12;
+          revealQueue.push({ kind: 'image', obj: chip });
         }
       });
 
@@ -746,6 +763,22 @@ export function renderPreviewPage(jobId: string): string {
         hashtagContainer.y = y;
         app.stage.addChild(hashtagContainer);
         y += hashtagContainer._contentHeight;
+      }
+
+      // The real attached-media block: every code image that actually
+      // rendered (Carbonara or the Shiki fallback), grouped as one gallery
+      // — this is what a real LinkedIn multi-image post looks like (a
+      // single swipeable block below the text), not an image per placeholder
+      // position. Sits after the text/hashtags and before the action bar,
+      // matching where LinkedIn renders attached media.
+      var galleryContainer = null;
+      var loadedGalleryImages = galleryImages.filter(function (s) { return s.texture && !s.skip; });
+      if (loadedGalleryImages.length > 0) {
+        galleryContainer = buildImageGallery(loadedGalleryImages, contentWidth);
+        galleryContainer.x = PADDING;
+        galleryContainer.y = y;
+        app.stage.addChild(galleryContainer);
+        y += galleryContainer._h + 8;
       }
 
       // Only draw the cutoff marker if the post is actually long enough to
@@ -777,6 +810,7 @@ export function renderPreviewPage(jobId: string): string {
         else { item.obj.alpha = 0; }
       });
       if (hashtagContainer) { hashtagContainer.alpha = 0; hashtagContainer.scale.set(0.95); }
+      if (galleryContainer) { galleryContainer.alpha = 0; }
       // The cutoff line is an annotation ABOUT the post, not part of it —
       // revealed last, after the reader has already "read" the whole card,
       // instead of competing with the typewriter/fade-in for attention.
@@ -784,6 +818,7 @@ export function renderPreviewPage(jobId: string): string {
 
       revealSequentially(revealQueue, 0, function () {
         if (hashtagContainer) popIn(hashtagContainer);
+        if (galleryContainer) fadeIn(galleryContainer, function () {});
         if (truncateMarker) fadeIn(truncateMarker, function () {});
       });
     });
@@ -896,6 +931,110 @@ export function renderPreviewPage(jobId: string): string {
     container.addChild(text);
     container._w = w;
     container._h = h;
+    return container;
+  }
+
+  // Small pill rendered inline where a [IMAGE_CODE_N]/[CODE_SNIPPET_N]
+  // placeholder sits in the text. LinkedIn can't actually show an image at
+  // this exact spot (see the file header comment), so this is deliberately
+  // just a text cue — "there's a code example discussed here, see image N
+  // in the gallery below" — not a picture. Greyed out if that image never
+  // rendered (Carbonara + Shiki fallback both failed) so it doesn't promise
+  // something the gallery below won't actually have.
+  function buildInlineChip(index, available) {
+    var color = available ? 0x0a66c2 : 0x999999;
+    var label = (available ? '🖼️' : '⚠️') + ' Exemplo ' + index + (available ? '' : ' (imagem indisponivel)');
+    var container = new PIXI.Container();
+
+    var text = new PIXI.Text({
+      text: label,
+      style: { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: 12, fontWeight: 'bold', fill: color },
+    });
+    text.x = 10;
+    text.y = 5;
+
+    var w = text.width + 20;
+    var h = text.height + 10;
+    var bg = new PIXI.Graphics();
+    bg.roundRect(0, 0, w, h, h / 2).fill({ color: color, alpha: 0.1 });
+    bg.stroke({ width: 1, color: color, alpha: 0.4 });
+
+    container.addChild(bg);
+    container.addChild(text);
+    container._w = w;
+    container._h = h;
+    return container;
+  }
+
+  // The real attached-media block, laid out the way LinkedIn's own
+  // multi-image gallery reads: small numbered thumbnails in a row (wrapping
+  // after 3 per row so it doesn't get too cramped), each with its engine
+  // badge. This is what the reader would actually see below the text on a
+  // real LinkedIn post — not one full-size image per paragraph.
+  function buildImageGallery(segs, maxWidth) {
+    var container = new PIXI.Container();
+    var GAP = 10;
+    var perRow = Math.min(3, segs.length);
+    var thumbWidth = Math.floor((maxWidth - GAP * (perRow - 1)) / perRow);
+
+    var heading = new PIXI.Text({
+      text: '🖼️ Imagens anexadas (' + segs.length + ')',
+      style: { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: 12, fontWeight: 'bold', fill: 0x666666 },
+    });
+    container.addChild(heading);
+
+    var rowY = heading.height + 8;
+    var col = 0, rowX = 0, rowMaxH = 0;
+    segs.forEach(function (seg) {
+      var scale = thumbWidth / seg.texture.width;
+      var sprite = new PIXI.Sprite(seg.texture);
+      sprite.width = thumbWidth;
+      sprite.height = seg.texture.height * scale;
+
+      var group = new PIXI.Container();
+      group.addChild(sprite);
+
+      // Small numbered circle in the corner — this is the number a reader
+      // would need to match against the "(exemplo N 👇)" cues in the text.
+      var numBg = new PIXI.Graphics();
+      numBg.circle(9, 9, 9).fill({ color: 0x0a66c2, alpha: 0.9 });
+      var numLabel = new PIXI.Text({
+        text: String(seg.index),
+        style: { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: 11, fontWeight: 'bold', fill: 0xffffff },
+      });
+      numLabel.x = 9 - numLabel.width / 2;
+      numLabel.y = 9 - numLabel.height / 2;
+      var numGroup = new PIXI.Container();
+      numGroup.addChild(numBg);
+      numGroup.addChild(numLabel);
+      numGroup.x = 6;
+      numGroup.y = 6;
+      group.addChild(numGroup);
+
+      if (seg.source) {
+        var badge = buildEngineBadge(seg.source);
+        badge.x = sprite.width - badge._w - 6;
+        badge.y = 6;
+        group.addChild(badge);
+      }
+
+      group.x = rowX;
+      group.y = rowY;
+      container.addChild(group);
+
+      rowMaxH = Math.max(rowMaxH, sprite.height);
+      rowX += thumbWidth + GAP;
+      col += 1;
+      if (col >= perRow) {
+        col = 0;
+        rowX = 0;
+        rowY += rowMaxH + GAP;
+        rowMaxH = 0;
+      }
+    });
+    if (col !== 0) rowY += rowMaxH + GAP;
+
+    container._h = rowY;
     return container;
   }
 
