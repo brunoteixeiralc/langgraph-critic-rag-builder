@@ -43,6 +43,53 @@ function shikiLangForExtension(ext: string): BundledLanguage {
   return 'typescript';
 }
 
+// 3x5 dot-matrix bitmap font for digits 0-9, used by the number badge below
+// instead of an SVG <text> element. Confirmed root cause of a real bug: the
+// badge circle rendered fine but the digit inside it was completely
+// invisible — Railway's container has no fonts installed at all, so
+// librsvg/resvg silently drops any <text> element it can't match to a real
+// font instead of erroring (no exception, no log, just a blank result).
+// Rects have no font dependency and render identically in any environment.
+const DIGIT_GLYPHS: Record<string, string[]> = {
+  '0': ['111', '101', '101', '101', '111'],
+  '1': ['010', '110', '010', '010', '111'],
+  '2': ['111', '001', '111', '100', '111'],
+  '3': ['111', '001', '111', '001', '111'],
+  '4': ['101', '101', '111', '001', '001'],
+  '5': ['111', '100', '111', '001', '111'],
+  '6': ['111', '100', '111', '101', '111'],
+  '7': ['111', '001', '001', '001', '001'],
+  '8': ['111', '101', '111', '101', '111'],
+  '9': ['111', '101', '111', '001', '111'],
+};
+
+// Builds the <rect> markup for a (possibly multi-digit) number using
+// DIGIT_GLYPHS above, laid out left to right. Returns the fragment plus its
+// total pixel width/height so the caller can size the badge pill around it.
+function buildDigitsSvgFragment(numberStr: string, pixelSize: number, gapBetweenDigits: number): { fragment: string; width: number; height: number } {
+  const GLYPH_COLS = 3;
+  const GLYPH_ROWS = 5;
+  const glyphWidth = GLYPH_COLS * pixelSize;
+  const glyphHeight = GLYPH_ROWS * pixelSize;
+  let fragment = '';
+  let xOffset = 0;
+  for (const ch of numberStr) {
+    const pattern = DIGIT_GLYPHS[ch] ?? DIGIT_GLYPHS['0'];
+    pattern.forEach((row, rowIndex) => {
+      for (let col = 0; col < GLYPH_COLS; col++) {
+        if (row[col] === '1') {
+          const x = xOffset + col * pixelSize;
+          const y = rowIndex * pixelSize;
+          fragment += `<rect x="${x}" y="${y}" width="${pixelSize}" height="${pixelSize}" fill="#ffffff" />`;
+        }
+      }
+    });
+    xOffset += glyphWidth + gapBetweenDigits;
+  }
+  const totalWidth = Math.max(glyphWidth, xOffset - gapBetweenDigits);
+  return { fragment, width: totalWidth, height: glyphHeight };
+}
+
 // Runs fn over items with at most `limit` in flight at once, preserving
 // result order. Sits between "one at a time" (slow, self-inflicted latency)
 // and unbounded Promise.all (tripped a rate limit on the free Carbonara API
@@ -256,12 +303,21 @@ Valid niche names: "ios", "node_react", "ai_engineering".`;
         const image = sharp(pngBuffer);
         const metadata = await image.metadata();
         const width = metadata.width ?? 800;
-        const diameter = Math.max(32, Math.min(56, Math.round(width * 0.06)));
-        const margin = Math.round(diameter * 0.35);
-        const fontSize = Math.round(diameter * 0.5);
-        const svg = `<svg width="${diameter}" height="${diameter}" xmlns="http://www.w3.org/2000/svg">
-  <circle cx="${diameter / 2}" cy="${diameter / 2}" r="${diameter / 2}" fill="#0a66c2" fill-opacity="0.95" />
-  <text x="${diameter / 2}" y="${diameter / 2}" text-anchor="middle" dominant-baseline="central" font-family="Arial, Helvetica, sans-serif" font-size="${fontSize}" font-weight="bold" fill="#ffffff">${displayIndex}</text>
+        const badgeHeight = Math.max(28, Math.min(48, Math.round(width * 0.045)));
+        // 5 rows tall per digit (see DIGIT_GLYPHS) + padding above/below —
+        // solve for a pixelSize that makes the digit grid fit badgeHeight.
+        const pixelSize = Math.max(2, Math.round(badgeHeight / 9));
+        const gapBetweenDigits = pixelSize;
+        const paddingX = pixelSize * 2;
+        const paddingY = pixelSize * 2;
+        const numberStr = String(displayIndex);
+        const digits = buildDigitsSvgFragment(numberStr, pixelSize, gapBetweenDigits);
+        const pillWidth = digits.width + paddingX * 2;
+        const pillHeight = digits.height + paddingY * 2;
+        const margin = Math.round(pillHeight * 0.35);
+        const svg = `<svg width="${pillWidth}" height="${pillHeight}" xmlns="http://www.w3.org/2000/svg">
+  <rect x="0" y="0" width="${pillWidth}" height="${pillHeight}" rx="${pillHeight / 2}" ry="${pillHeight / 2}" fill="#0a66c2" fill-opacity="0.95" />
+  <g transform="translate(${paddingX}, ${paddingY})">${digits.fragment}</g>
 </svg>`;
         return await image
           .composite([{ input: Buffer.from(svg), top: margin, left: margin }])
