@@ -44,7 +44,26 @@ const BASE_DELAY_MS = 2000; // 2s, 4s, 8s (exponential backoff)
 // waiting at the deadline. Same caveat as that one: the underlying call
 // isn't cancelled, just abandoned, so it can keep running in the background
 // after this rejects.
-const LLM_CALL_TIMEOUT_MS = 150_000;
+//
+// Bumped again, 150s -> 240s, after analyzing a full production LangSmith
+// trace of a slow (~909s) run end to end: the Reviewer's very first call
+// alone took ~453s because it hit this exact 150s ceiling on THREE straight
+// attempts (each landing at ~150-154s — legitimately slow generation on a
+// 5-snippet draft, not a hang), and each abandoned attempt kept running
+// server-side in the background per the caveat above, so the retries never
+// actually helped, they just serialized three ~150s waits back to back for
+// what was always going to be a ~150-160s response. Meanwhile the two OTHER
+// Reviewer calls in that same run finished in a single attempt at ~109s and
+// ~116s — right under the old ceiling. 150s was sitting exactly in the
+// danger zone for this model/prompt combination. 240s gives real successful
+// calls like the ~154s ones room to land on the first attempt instead of
+// being abandoned and retried for no benefit — measured against that same
+// trace, this alone would have cut the run from ~909s to an estimated
+// ~610s. (Full breakdown, for anyone re-deriving this: orchestrator ~5.5s,
+// iosSpecialist calls ~109s/~50s/~9s, Reviewer calls ~453s/~117s/~109s,
+// imageExtractor ~57s — image rendering was NOT the bottleneck here, the
+// Reviewer's timeout/retry cascade was ~75% of total time by itself.)
+const LLM_CALL_TIMEOUT_MS = 240_000;
 
 function raceWithTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return Promise.race([
