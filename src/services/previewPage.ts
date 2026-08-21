@@ -84,7 +84,8 @@ export function renderPreviewPage(jobId: string): string {
     cursor: pointer;
   }
   .keyRow button:hover { background: #004182; }
-  #status { margin-top: 10px; font-size: 13px; color: #555; min-height: 16px; }
+  #statusWrap { margin-top: 10px; min-height: 30px; }
+  #statusWrap canvas { display: block; }
   /* Hidden until a job actually finishes — nothing to copy/download while
      pending/running, and no point cluttering the toolbar before then. */
   #actions { display: none; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
@@ -158,7 +159,7 @@ export function renderPreviewPage(jobId: string): string {
       <input id="apiKey" type="password" placeholder="Cole sua x-api-key aqui" autocomplete="off">
       <button id="loadBtn">Carregar</button>
     </div>
-    <div id="status"></div>
+    <div id="statusWrap"></div>
     <div id="headerInfo"></div>
     <div id="actions">
       <button id="copyTextBtn" type="button">📋 Copiar texto p/ LinkedIn</button>
@@ -178,7 +179,7 @@ export function renderPreviewPage(jobId: string): string {
   var STORAGE_KEY = 'lcrb_api_key';
   var apiKeyInput = document.getElementById('apiKey');
   var loadBtn = document.getElementById('loadBtn');
-  var statusEl = document.getElementById('status');
+  var statusWrapEl = document.getElementById('statusWrap');
   var headerEl = document.getElementById('headerInfo');
   var canvasContainer = document.getElementById('canvasContainer');
   var actionsEl = document.getElementById('actions');
@@ -502,9 +503,115 @@ export function renderPreviewPage(jobId: string): string {
     loadingApp = null;
   }
 
+  // ---------------- PixiJS: status bar ----------------
+  // Replaces the old plain "<div>Status: running — atualizando a cada
+  // 3s...</div>" text with a small canvas: a colored dot (pulsing while
+  // something's actually in flight) + the same status text as before +, for
+  // in-progress states only, a slim indeterminate shimmer bar underneath —
+  // the part that used to just sit there looking dead while the 3s poll
+  // loop ran. setStatus(msg, isError) keeps its original 2-arg signature —
+  // every existing call site is unchanged — the "kind" (progress/success/
+  // error) is inferred from isError plus whether msg looks like an
+  // in-progress message (ends in "..."), which happens to classify every
+  // message this page actually sends correctly.
+  var statusApp = null;
+  var statusDot = null;
+  var statusText = null;
+  var statusShimmerTrack = null;
+  var statusShimmerFill = null;
+  var statusKind = 'progress';
+  var statusWidth = 0;
+  // setStatus() can (and does, on first load) fire before app.init()
+  // below resolves — these hold the latest values so the init callback can
+  // paint the correct state immediately once the canvas objects exist,
+  // instead of the first status update silently getting dropped.
+  var statusLatestMsg = '';
+
+  var STATUS_COLORS = {
+    progress: 0x0a66c2,
+    success: 0x1a7f37,
+    error: 0xc0392b,
+  };
+
+  function initStatusBar() {
+    if (statusApp) return;
+    var width = Math.max(200, statusWrapEl.clientWidth || 300);
+    statusWidth = width;
+    var app = new PIXI.Application();
+    statusApp = app;
+
+    app.init({
+      width: width,
+      height: 30,
+      backgroundAlpha: 0,
+      antialias: true,
+      resolution: window.devicePixelRatio || 1,
+      autoDensity: true,
+    }).then(function () {
+      if (statusApp !== app) { app.destroy(true, { children: true }); return; } // superseded before init finished
+      statusWrapEl.appendChild(app.canvas);
+
+      statusDot = new PIXI.Graphics();
+      statusDot.circle(0, 0, 4).fill({ color: STATUS_COLORS.progress });
+      statusDot.x = 6;
+      statusDot.y = 9;
+      app.stage.addChild(statusDot);
+
+      statusText = new PIXI.Text({
+        text: '',
+        style: { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: 13, fill: 0x555555 },
+      });
+      statusText.x = 18;
+      statusText.y = 0;
+      app.stage.addChild(statusText);
+
+      statusShimmerTrack = new PIXI.Graphics();
+      statusShimmerTrack.x = 18;
+      statusShimmerTrack.y = 22;
+      app.stage.addChild(statusShimmerTrack);
+
+      statusShimmerFill = new PIXI.Graphics();
+      statusShimmerFill.x = 18;
+      statusShimmerFill.y = 22;
+      app.stage.addChild(statusShimmerFill);
+
+      applyStatusVisuals(); // paint whatever setStatus() already recorded while this was still initializing
+
+      app.ticker.add(function () {
+        var t = performance.now() / 1000;
+        var pulsing = statusKind === 'progress';
+        statusDot.alpha = pulsing ? 0.55 + 0.45 * Math.sin(t * 4) : 1;
+        statusDot.scale.set(pulsing ? 0.9 + 0.25 * Math.sin(t * 4) : 1);
+
+        var trackWidth = Math.max(0, statusWidth - 18);
+        statusShimmerTrack.visible = pulsing;
+        statusShimmerFill.visible = pulsing;
+        if (pulsing && trackWidth > 0) {
+          statusShimmerTrack.clear();
+          statusShimmerTrack.roundRect(0, 0, trackWidth, 3, 1.5).fill({ color: 0xe5e7eb });
+
+          var segWidth = Math.max(24, trackWidth * 0.28);
+          var travel = trackWidth + segWidth;
+          var pos = ((t * 90) % travel) - segWidth;
+          statusShimmerFill.clear();
+          statusShimmerFill.roundRect(Math.max(0, pos), 0, Math.min(segWidth, trackWidth - Math.max(0, pos)), 3, 1.5).fill({ color: STATUS_COLORS.progress, alpha: 0.8 });
+        }
+      });
+    });
+  }
+
+  function applyStatusVisuals() {
+    if (!statusText || !statusDot) return; // canvas not ready yet — initStatusBar's init callback re-runs this once it is
+    statusText.text = statusLatestMsg;
+    statusDot.clear();
+    statusDot.circle(0, 0, 4).fill({ color: STATUS_COLORS[statusKind] });
+  }
+
   function setStatus(msg, isError) {
-    statusEl.textContent = msg;
-    statusEl.style.color = isError ? '#c0392b' : '#555';
+    statusLatestMsg = msg;
+    statusKind = isError ? 'error' : (msg.indexOf('...') !== -1 ? 'progress' : 'success');
+    initStatusBar();
+    applyStatusVisuals();
   }
 
   function escapeHtml(s) {

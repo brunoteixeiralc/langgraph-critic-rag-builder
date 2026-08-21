@@ -131,6 +131,15 @@ export function renderHomePage(): string {
     </div>
 
     <div class="field">
+      <label>Teste rápido (sem custo, sem chamar o LLM)</label>
+      <div id="nicheCardsWrap"></div>
+      <button id="mockBtn" type="button" class="secondary">Gerar mock</button>
+      <div class="hint">Usa conteudo fixo de exemplo pra testar preview/imagens/layout sem gastar tokens de LLM. Escolha só o nicho, sem precisar escrever nada abaixo.</div>
+    </div>
+
+    <hr class="divider">
+
+    <div class="field">
       <label for="topic">Tópico / comando</label>
       <textarea id="topic" maxlength="2000" placeholder="Ex: Explique as novidades do Swift Testing, com exemplos de codigo, baseado neste artigo: https://..."></textarea>
       <div id="charBarWrap" class="charBarWrap"></div>
@@ -139,15 +148,6 @@ export function renderHomePage(): string {
 
     <button id="generateBtn" type="button">Gerar post</button>
     <div id="launchWrap"></div>
-
-    <hr class="divider">
-
-    <div class="field">
-      <label>Teste rápido (sem custo, sem chamar o LLM)</label>
-      <div id="nicheCardsWrap"></div>
-      <button id="mockBtn" type="button" class="secondary">Gerar mock</button>
-      <div class="hint">Usa conteudo fixo de exemplo pra testar preview/imagens/layout sem gastar tokens de LLM.</div>
-    </div>
 
     <div id="status"></div>
   </div>
