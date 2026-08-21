@@ -278,7 +278,7 @@ export function renderPreviewPage(jobId: string): string {
     var text = data.finalPostText || data.unapprovedDraft || '';
     var hasImages = !!(data.codeImages && data.codeImages.length > 0);
     text = text.replace(/\\[(?:IMAGE_CODE|CODE_SNIPPET)_(\\d+)\\]/g, function (_m, n) {
-      return '(exemplo ' + n + ' 👇)';
+      return '(example ' + n + ' 👇)';
     });
     // LinkedIn's post composer doesn't render Markdown — "**bold**" just
     // shows up as literal asterisks in a real post now. Strip them for the
@@ -289,12 +289,15 @@ export function renderPreviewPage(jobId: string): string {
     // consecutive newlines behind — collapse back down to a normal
     // paragraph break.
     text = text.replace(/\\n{3,}/g, '\\n\\n').trim();
-    // LinkedIn can't show the images at the "(exemplo N)" cues above — they
+    // LinkedIn can't show the images at the "(example N)" cues above — they
     // only attach as one gallery block. Spell that out once so whoever
     // pastes this remembers to actually upload the images (via "Baixar
-    // imagens") in the same numbered order.
+    // imagens") in the same numbered order. In English — this line joins
+    // the post's own body text, which is always written in English (see
+    // the specialist prompts), so it has to match rather than sticking out
+    // as the one Portuguese line in an otherwise English post.
     if (hasImages) {
-      text += '\\n\\n📎 Imagens dos exemplos de codigo anexadas a este post, na mesma ordem numerada acima.';
+      text += '\\n\\n📎 Code example images attached to this post, in the same numbered order above.';
     }
     if (data.hashtags && data.hashtags.length > 0) {
       // The Reviewer's hashtags field doesn't always include the leading
@@ -1079,7 +1082,7 @@ export function renderPreviewPage(jobId: string): string {
   // something the gallery below won't actually have.
   function buildInlineChip(index, available) {
     var color = available ? 0x0a66c2 : 0x999999;
-    var label = (available ? '🖼️' : '⚠️') + ' Exemplo ' + index + (available ? '' : ' (imagem indisponivel)');
+    var label = (available ? '🖼️' : '⚠️') + ' Example ' + index + (available ? '' : ' (image unavailable)');
     var container = new PIXI.Container();
 
     var text = new PIXI.Text({
@@ -1114,7 +1117,7 @@ export function renderPreviewPage(jobId: string): string {
     var thumbWidth = Math.floor((maxWidth - GAP * (perRow - 1)) / perRow);
 
     var heading = new PIXI.Text({
-      text: '🖼️ Imagens anexadas (' + segs.length + ')',
+      text: '🖼️ Attached images (' + segs.length + ')',
       style: { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: 12, fontWeight: 'bold', fill: 0x666666 },
     });
     container.addChild(heading);
