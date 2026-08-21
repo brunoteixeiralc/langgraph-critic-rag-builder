@@ -50,6 +50,7 @@
     "ipaddr.js": "^2.5.0",
     "langchain": "^1.2.21",
     "langsmith": "^0.8.7",
+    "sharp": "^0.35.3",
     "shiki-image": "^0.1.4",
     "zod": "^3.23.8"
   }

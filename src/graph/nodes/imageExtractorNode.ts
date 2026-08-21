@@ -5,6 +5,7 @@ import type { GraphState } from '../graph.ts';
 import { MAX_REVIEW_ATTEMPTS } from './edgeConditions.ts';
 import { codeToImage } from 'shiki-image';
 import type { BundledLanguage } from 'shiki';
+import sharp from 'sharp';
 
 // Minimum length for a technicalDraft to be considered salvageable when the
 // review loop is cut off at MAX_REVIEW_ATTEMPTS without approval.
@@ -241,6 +242,37 @@ Valid niche names: "ios", "node_react", "ai_engineering".`;
       }
     }
 
+    // Bakes a small numbered badge into the top-left corner of the rendered
+    // code image, matching the "(exemplo N 👇)" cue now placed in the post
+    // text (see previewPage.ts's getPlainPostText). This has to be burned
+    // into the actual PNG pixels, not just drawn on the preview <canvas> —
+    // once these get uploaded to LinkedIn's own multi-image gallery,
+    // LinkedIn has no concept of "this is example 2", the filename is
+    // discarded, and the only thing that survives the upload for a reader
+    // to match an image back to its mention in the text is what's visibly
+    // printed on the image itself.
+    async function addNumberBadge(pngBuffer: Buffer, displayIndex: number): Promise<Buffer> {
+      try {
+        const image = sharp(pngBuffer);
+        const metadata = await image.metadata();
+        const width = metadata.width ?? 800;
+        const diameter = Math.max(32, Math.min(56, Math.round(width * 0.06)));
+        const margin = Math.round(diameter * 0.35);
+        const fontSize = Math.round(diameter * 0.5);
+        const svg = `<svg width="${diameter}" height="${diameter}" xmlns="http://www.w3.org/2000/svg">
+  <circle cx="${diameter / 2}" cy="${diameter / 2}" r="${diameter / 2}" fill="#0a66c2" fill-opacity="0.95" />
+  <text x="${diameter / 2}" y="${diameter / 2}" text-anchor="middle" dominant-baseline="central" font-family="Arial, Helvetica, sans-serif" font-size="${fontSize}" font-weight="bold" fill="#ffffff">${displayIndex}</text>
+</svg>`;
+        return await image
+          .composite([{ input: Buffer.from(svg), top: margin, left: margin }])
+          .png()
+          .toBuffer();
+      } catch (e) {
+        console.warn(`[Image Extractor] Failed to bake number badge onto snippet ${displayIndex} — shipping the image without it:`, e instanceof Error ? e.message : e);
+        return pngBuffer;
+      }
+    }
+
     // One snippet at a time was purely self-inflicted latency: each render
     // is an independent HTTP call to Carbonara with no dependency on the
     // others, so a post with 3 snippets paid 3x the round-trip for no
@@ -279,6 +311,8 @@ Valid niche names: "ios", "node_react", "ai_engineering".`;
           return null;
         }
       }
+
+      pngBuffer = await addNumberBadge(pngBuffer, index + 1);
 
       const filename = `snippet_${index + 1}.png`;
       const imgPath = path.join(outputDir, filename);

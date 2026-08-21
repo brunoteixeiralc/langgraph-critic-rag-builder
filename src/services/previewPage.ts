@@ -994,22 +994,12 @@ export function renderPreviewPage(jobId: string): string {
       var group = new PIXI.Container();
       group.addChild(sprite);
 
-      // Small numbered circle in the corner — this is the number a reader
-      // would need to match against the "(exemplo N 👇)" cues in the text.
-      var numBg = new PIXI.Graphics();
-      numBg.circle(9, 9, 9).fill({ color: 0x0a66c2, alpha: 0.9 });
-      var numLabel = new PIXI.Text({
-        text: String(seg.index),
-        style: { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: 11, fontWeight: 'bold', fill: 0xffffff },
-      });
-      numLabel.x = 9 - numLabel.width / 2;
-      numLabel.y = 9 - numLabel.height / 2;
-      var numGroup = new PIXI.Container();
-      numGroup.addChild(numBg);
-      numGroup.addChild(numLabel);
-      numGroup.x = 6;
-      numGroup.y = 6;
-      group.addChild(numGroup);
+      // NOTE: no JS-drawn number circle here on purpose — imageExtractorNode.ts
+      // now bakes the "N" badge directly into the PNG pixels server-side (see
+      // addNumberBadge there), because that's the only thing that survives
+      // once the image is uploaded to LinkedIn's own gallery (filenames and
+      // any canvas-only annotation are lost at that point). Drawing a second
+      // number here would just double up on top of the real one.
 
       if (seg.source) {
         var badge = buildEngineBadge(seg.source);
