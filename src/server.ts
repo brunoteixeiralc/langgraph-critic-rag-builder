@@ -264,9 +264,15 @@ app.get('/health', (_req: Request, res: Response) => {
 // own JS collects the key client-side and uses it for the real POST
 // /generate call below, which stays fully protected.
 app.get('/', (_req: Request, res: Response) => {
+  // Same CSP shape as /result/:jobId/preview below — this page now also
+  // loads PixiJS from cdnjs for the gamified form (ambient background,
+  // char-count gauge, niche cards, launch animation). 'unsafe-eval' is
+  // PixiJS v8 itself (mask/filter codegen via `new Function()`), not
+  // something this page's own code needs.
   res.setHeader(
     'Content-Security-Policy',
-    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self'; connect-src 'self';",
+    "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com; " +
+    "style-src 'self' 'unsafe-inline'; img-src 'self'; connect-src 'self' https://cdnjs.cloudflare.com;",
   );
   res.status(200).set('Content-Type', 'text/html; charset=utf-8').send(renderHomePage());
 });
