@@ -37,10 +37,10 @@
     "node": ">=24.10.0"
   },
   "dependencies": {
-    "@langchain/core": "^1.2.1",
+    "@langchain/core": "^1.2.8",
     "@langchain/google-genai": "^2.2.0",
-    "@langchain/langgraph": "^1.4.7",
-    "@langchain/openai": "^1.5.7",
+    "@langchain/langgraph": "^1.4.10",
+    "@langchain/openai": "^1.5.8",
     "@langchain/pinecone": "^1.0.3",
     "@pinecone-database/pinecone": "^5.1.2",
     "cors": "^2.8.6",
@@ -48,8 +48,8 @@
     "express-rate-limit": "^8.6.2",
     "helmet": "^8.3.0",
     "ipaddr.js": "^2.5.0",
-    "langchain": "^1.2.21",
-    "langsmith": "^0.8.7",
+    "langchain": "^1.5.9",
+    "langsmith": "^0.8.11",
     "sharp": "^0.35.3",
     "shiki-image": "^0.1.4",
     "zod": "^3.23.8"
